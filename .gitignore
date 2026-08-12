@@ -1,0 +1,29 @@
+# Environments
+.env
+venv/
+node_modules/
+__pycache__/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Output & Work directories
+work/
+output/
+logs/
+.thumbnails/
+
+# Temp / Input files
+*.ogg
+temp.ogg
+*.pptx
+
+# Inbox (Exclude content inside inbox except .gitkeep)
+inbox/*
+!inbox/.gitkeep
+
+# Exclude generated assets in hyperframes app
+hyperframes-app/assets/*
+!hyperframes-app/assets/.gitkeep
