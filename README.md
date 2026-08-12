@@ -43,7 +43,7 @@ brew install imagemagick
    ```bash
    ./setup.sh
    ```
-   *(Windows環境で bash が使えない場合は、`python -m venv venv`, `pip install -r requirements.txt`, および `cd hyperframes-app && npm install` を手動またはAIエージェントに実行させてください)*
+   *(※Windows環境で手動構築する場合は `setup.bat` をダブルクリックするか、コマンドプロンプトで実行してください)*
 
 ---
 
@@ -74,8 +74,11 @@ brew install imagemagick
 CLIから直接実行する場合は以下のコマンドを使用します。
 
 ```bash
-# inbox/ フォルダに PDFとMD を入れた状態で実行
+# Macの場合
 ./run.sh
+
+# Windowsの場合
+run.bat
 ```
 これにより、`work/` ディレクトリ内で中間ファイル（画像や音声）が生成され、最終的な動画が `output/` フォルダに保存されます。
 
