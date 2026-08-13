@@ -22,11 +22,21 @@ brew install imagemagick
 ```
 * その他、**Python 3.10+** と **Node.js (npm)** が必要です。
 
-### Windows の場合
-* **Python 3.10+**
-* **Node.js (npm)**
-* **FFmpeg**: 環境変数 `PATH` に追加されていること。
-* **Poppler**: `pdf2image` を使うために必要。Windows用のバイナリをダウンロードして `PATH` に追加するか、WSL（Windows Subsystem for Linux）上で動かすことを推奨します。
+### Windows の場合 (Chocolatey使用・推奨)
+Windowsではパッケージマネージャー「Chocolatey」を使うと、コピペ一発ですべての環境が揃います。
+
+**管理者権限**でPowerShellを開き、以下のコマンドを順番にコピペして実行してください。
+
+1. Chocolateyのインストール（未導入の場合）
+```powershell
+Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+```
+
+2. 必須ツールのインストール
+```powershell
+choco install python nodejs ffmpeg poppler -y
+```
+*(インストール後、環境変数を反映させるためにPowerShellを一度再起動してください)*
 
 ---
 
