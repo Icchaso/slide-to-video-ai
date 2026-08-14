@@ -1,11 +1,11 @@
 {
-  "name": "hyperframes-project",
+  "name": "slide-to-video-ai",
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "npx --yes hyperframes@0.7.106 preview",
-    "check": "npx --yes hyperframes@0.7.106 check",
-    "render": "npx --yes hyperframes@0.7.106 render",
-    "publish": "npx --yes hyperframes@0.7.106 publish"
+    "dev": "npm --prefix hyperframes-app run dev",
+    "check": "npm --prefix hyperframes-app run check",
+    "render": "npm --prefix hyperframes-app run render",
+    "publish": "npm --prefix hyperframes-app run publish"
   }
 }

@@ -20,6 +20,9 @@ logs/
 temp.ogg
 *.pptx
 
+# Sample/output videos at repo root (do not commit large media)
+/*.mp4
+
 # Inbox (Exclude content inside inbox except .gitkeep)
 inbox/*
 !inbox/.gitkeep
