@@ -41,11 +41,7 @@ source venv/bin/activate
 
 echo ">> Python ライブラリをインストールします..."
 pip install --upgrade pip
-# pdf2image: PDF分割
-# requests: Fish Audio API通信など
-# python-dotenv: 環境変数読み込み
-# python-docx: docx読み込み
-pip install pdf2image requests python-dotenv python-docx
+pip install -r requirements.txt
 
 echo "========================================="
 echo " セットアップ完了！"

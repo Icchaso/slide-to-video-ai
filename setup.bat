@@ -30,7 +30,7 @@ call venv\Scripts\activate.bat
 echo.
 echo ^>^> Python ライブラリをインストールします...
 python -m pip install --upgrade pip
-pip install pdf2image requests python-dotenv python-docx
+pip install -r requirements.txt
 
 echo.
 echo =========================================

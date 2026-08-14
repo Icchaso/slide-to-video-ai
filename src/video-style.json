@@ -1,21 +1,55 @@
 {
   "design": {
     "font_family": "Noto Sans JP, sans-serif",
-    "font_weight": "bold",
     "text_color": "#FFFFFF",
     "stroke_color": "#000000",
-    "stroke_width": 4,
-    "highlight_color": "#FFD700"
+    "highlight_color": "#FFD700",
+    "subtitle_font_size": 58,
+    "subtitle_background": "band",
+    "subtitle_max_chars_per_line": 16,
+    "subtitle_max_lines": 2
   },
   "animation": {
-    "subtitle_transition": "fade",
-    "subtitle_max_lines": 2,
     "slide_transition": "crossfade",
-    "zoom_effect": "slow_pan"
+    "transition_duration": 0.6,
+    "ken_burns": true,
+    "ken_burns_zoom": 1.06,
+    "subtitle_lead_time": 0.08
+  },
+  "intro": {
+    "enabled": true,
+    "duration": 3.0
+  },
+  "outro": {
+    "enabled": true,
+    "duration": 4.0,
+    "text": "ご視聴ありがとうございました"
   },
   "audio": {
-    "bgm_volume_ratio": 0.40,
-    "fade_in_duration": 2,
-    "fade_out_duration": 3
+    "bgm_volume_db": -18,
+    "duck_threshold": 0.03,
+    "duck_ratio": 8,
+    "duck_attack_ms": 20,
+    "duck_release_ms": 400,
+    "fade_in_duration": 2.0,
+    "fade_out_duration": 4.0,
+    "loudness_target_lufs": -14,
+    "loudness_true_peak": -1.5,
+    "tts_speed": 1.0,
+    "tts_temperature": 0.5,
+    "lead_silence": 0.25,
+    "tail_silence": 0.6
+  },
+  "sfx": {
+    "enabled": true,
+    "transition_file": "whoosh-short.mp3",
+    "transition_volume": 0.22,
+    "intro_file": "impact-bass-1.mp3",
+    "intro_volume": 0.35
+  },
+  "transcribe": {
+    "enabled": true,
+    "model": "small",
+    "language": "ja"
   }
 }

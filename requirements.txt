@@ -1,0 +1,5 @@
+pdf2image
+requests
+python-dotenv
+python-docx
+edge-tts
