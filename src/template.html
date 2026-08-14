@@ -3,57 +3,145 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=1920, height=1080" />
-    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@700;900&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@500;700;900&display=swap" rel="stylesheet">
     <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
     <style>
-      * { margin: 0; padding: 0; box-sizing: border-box; }
-      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; font-family: 'Noto Sans JP', sans-serif; }
-      
-      /* HyperFramesのタイムライン制御用クラス */
-      .clip { opacity: 1; } 
-      
-      .slide-image {
-        position: absolute;
-        width: 1920px;
-        height: 1080px;
-        object-fit: contain;
+      :root {
+        --card-bg-a: __CARD_BG_A__;
+        --card-bg-b: __CARD_BG_B__;
+        --accent-a: __ACCENT_A__;
+        --accent-b: __ACCENT_B__;
       }
-      
-      /* プロ級のテロップデザイン */
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #000; font-family: __FONT_FAMILY__; }
+
+      .clip { opacity: 1; }
+
+      /* ===== スライドシーン =====
+         クリップ本体のopacityはフレームワーク所有。
+         クロスフェードは .scene-inner、Ken Burns は .kb-wrap に適用する（tween競合防止のため分離） */
+      .slide-scene { position: absolute; inset: 0; }
+      .scene-inner { position: absolute; inset: 0; will-change: opacity; }
+
+      /* レターボックス回避のぼかし拡大背景（echo pillarboxing） */
+      .bg-blur { position: absolute; inset: 0; overflow: hidden; }
+      .bg-blur img {
+        position: absolute;
+        left: -6%; top: -6%;
+        width: 112%; height: 112%;
+        object-fit: cover;
+        filter: blur(22px) brightness(0.5) saturate(1.15);
+      }
+
+      /* 前面のシャープなスライド（セーフエリア内・カード調） */
+      .kb-wrap {
+        position: absolute; inset: 0;
+        display: flex; align-items: center; justify-content: center;
+        will-change: transform;
+      }
+      .slide-img {
+        width: 93%; height: 93%;
+        object-fit: contain;
+        border-radius: 12px;
+        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
+      }
+
+      /* ===== テロップ（放送基準: 白文字+黒縁+座布団、即時表示） ===== */
       .subtitle-wrapper {
         position: absolute;
         width: 1920px;
-        bottom: 45px; /* 画面下からの余白を減らし、より下部に配置 */
+        bottom: 58px;
         display: flex;
         justify-content: center;
-        align-items: center;
+        align-items: flex-end;
         pointer-events: none;
       }
-      
       .subtitle-box {
-        max-width: 1600px;
+        max-width: 1720px;
         text-align: center;
-        font-size: 54px;
-        color: #ffffff;
+        font-size: __SUBTITLE_FONT_SIZE__px;
+        color: __TEXT_COLOR__;
         font-weight: 900;
-        white-space: pre-wrap;
-        line-height: 1.25; /* 行間を詰めて間延びを防ぐ */
-        letter-spacing: 2px;
-        
-        /* 囲み（背景）を完全に削除し、文字自体の視認性を極めるスタイル */
-        padding: 10px 40px;
-        
-        /* 禁則処理を厳格化し、不自然な改行（例：ーション の分離）を防ぐ */
+        white-space: pre-line;
+        line-height: 1.42;
+        letter-spacing: 1px;
         line-break: strict;
         word-break: normal;
-        
-        /* text-strokeは文字の内側を潰すため廃止し、外側のみに影（縁取り）を生成する */
-        text-shadow: 
-          3px 3px 0 #000, -3px -3px 0 #000, 
-          -3px 3px 0 #000, 3px -3px 0 #000,
-          0px 3px 0 #000, 0px -3px 0 #000,
-          3px 0px 0 #000, -3px 0px 0 #000,
-          0px 8px 15px rgba(0,0,0,0.8);
+        padding: 12px 46px;
+        border-radius: 14px;
+        background: __SUBTITLE_BG__;
+        text-shadow:
+          2px 2px 0 __STROKE_COLOR__, -2px -2px 0 __STROKE_COLOR__,
+          -2px 2px 0 __STROKE_COLOR__, 2px -2px 0 __STROKE_COLOR__,
+          0px 2px 0 __STROKE_COLOR__, 0px -2px 0 __STROKE_COLOR__,
+          2px 0px 0 __STROKE_COLOR__, -2px 0px 0 __STROKE_COLOR__,
+          0px 6px 14px rgba(0, 0, 0, 0.7);
+      }
+      .subtitle-box .kw { color: __HIGHLIGHT_COLOR__; }
+
+      /* ===== イントロ / アウトロカード ===== */
+      .card-scene { position: absolute; inset: 0; }
+      .card-bg {
+        position: absolute; inset: 0;
+        background:
+          radial-gradient(1200px 700px at 30% 20%, color-mix(in srgb, var(--accent-a) 28%, transparent), transparent 60%),
+          radial-gradient(1000px 650px at 78% 82%, color-mix(in srgb, var(--accent-b) 16%, transparent), transparent 60%),
+          linear-gradient(160deg, var(--card-bg-a) 0%, var(--card-bg-b) 55%, var(--card-bg-a) 100%);
+      }
+      .card-glow {
+        position: absolute;
+        left: 50%; top: 50%;
+        width: 1400px; height: 900px;
+        transform: translate(-50%, -50%);
+        background: radial-gradient(closest-side, color-mix(in srgb, var(--accent-a) 22%, transparent), transparent 70%);
+        will-change: transform, opacity;
+      }
+      .card-content {
+        position: absolute; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        gap: 34px;
+      }
+      .intro-label {
+        font-size: 26px;
+        font-weight: 700;
+        letter-spacing: 10px;
+        color: rgba(255, 255, 255, 0.72);
+        will-change: transform, opacity;
+      }
+      .intro-title {
+        max-width: 1600px;
+        text-align: center;
+        font-size: 96px;
+        font-weight: 900;
+        line-height: 1.28;
+        letter-spacing: 2px;
+        background: linear-gradient(100deg, #ffffff 20%, color-mix(in srgb, var(--accent-a) 60%, #ffffff) 60%, var(--accent-a) 90%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        will-change: transform, opacity;
+      }
+      .intro-bar {
+        width: 320px; height: 8px;
+        border-radius: 4px;
+        background: linear-gradient(90deg, var(--accent-a), var(--accent-b));
+        transform-origin: center;
+        will-change: transform, opacity;
+      }
+      .outro-title {
+        font-size: 72px;
+        font-weight: 900;
+        color: #ffffff;
+        letter-spacing: 4px;
+        will-change: transform, opacity;
+      }
+      .outro-sub {
+        font-size: 34px;
+        font-weight: 700;
+        color: rgba(255, 255, 255, 0.6);
+        letter-spacing: 2px;
+        will-change: transform, opacity;
       }
     </style>
   </head>
@@ -61,39 +149,83 @@
     <div id="root" data-composition-id="main" data-start="0" data-duration="<!-- TOTAL_DURATION -->" data-width="1920" data-height="1080">
       <!-- INSERT_CLIPS_HERE -->
     </div>
+
     <script>
       window.__timelines = window.__timelines || {};
       const tl = gsap.timeline({ paused: true });
       window.__timelines["main"] = tl;
-      
-      // プロ級のGSAPアニメーション
-      document.querySelectorAll('.clip').forEach(clip => {
+
+      const KB_PAN = 26; // Ken Burns パン距離(px)
+
+      // ===== スライドシーン: クロスフェード + Ken Burns（方向はPython側がindexローテーションで指定） =====
+      document.querySelectorAll(".slide-scene").forEach((clip) => {
         const start = parseFloat(clip.dataset.start);
-        const duration = parseFloat(clip.dataset.duration);
-        
-        // スライド画像：シネマティックなゆっくりとしたズーム
-        if (clip.classList.contains('slide-image')) {
-          const img = clip.querySelector('img');
-          if (img) {
-            tl.fromTo(img, 
-              { scale: 1.0 }, 
-              { scale: 1.05, duration: duration, ease: "none" }, 
-              start
-            );
-          }
+        const dur = parseFloat(clip.dataset.duration);
+        const kb = clip.dataset.kb || "none";
+        const zoom = parseFloat(clip.dataset.kbZoom || "1.06");
+        const fadeIn = parseFloat(clip.dataset.fadeIn || "0");
+        const inner = clip.querySelector(".scene-inner");
+        const kbWrap = clip.querySelector(".kb-wrap");
+
+        // クロスフェード: z-indexで後続スライドが上に来るため、入場側のフェードだけで成立（dip-to-blackなし）
+        if (fadeIn > 0) {
+          tl.fromTo(inner, { opacity: 0 }, { opacity: 1, duration: fadeIn, ease: "power1.inOut" }, start);
+        } else {
+          tl.set(inner, { opacity: 1 }, start);
         }
-        
-        // テロップ：バウンス感のあるリッチなポップイン
-        const subtitleBox = clip.querySelector('.subtitle-box');
-        if (subtitleBox) {
-          // 箱自体がポンッと現れる
-          tl.fromTo(subtitleBox, 
-            { y: 50, scale: 0.9, opacity: 0 }, 
-            { y: 0, scale: 1, opacity: 1, duration: 0.8, ease: "back.out(1.5)" }, 
-            start
-          );
+
+        // Ken Burns（微小・全尺・sine）: 文字スライドが破綻しない6%上限で運用
+        if (kbWrap && kb !== "none") {
+          let from = { scale: 1.0, x: 0, y: 0 };
+          let to = { scale: zoom, x: 0, y: 0 };
+          if (kb === "out") { from = { scale: zoom, x: 0, y: 0 }; to = { scale: 1.0, x: 0, y: 0 }; }
+          else if (kb === "left") { from = { scale: zoom, x: KB_PAN, y: 0 }; to = { scale: zoom, x: -KB_PAN, y: 0 }; }
+          else if (kb === "right") { from = { scale: zoom, x: -KB_PAN, y: 0 }; to = { scale: zoom, x: KB_PAN, y: 0 }; }
+          tl.fromTo(kbWrap, from, { ...to, duration: dur, ease: "sine.inOut" }, start);
         }
       });
+
+      // ===== テロップ: 発話追従テロップは即時表示が放送標準のためtweenなし（クリップ境界で瞬時切替） =====
+
+      // ===== イントロカード =====
+      const intro = document.getElementById("intro-card");
+      if (intro) {
+        const s = parseFloat(intro.dataset.start);
+        const d = parseFloat(intro.dataset.duration);
+        tl.fromTo("#intro-card .intro-label",
+          { opacity: 0, y: 16 },
+          { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, s + 0.15);
+        tl.fromTo("#intro-card .intro-title",
+          { opacity: 0, y: 46, scale: 0.97 },
+          { opacity: 1, y: 0, scale: 1, duration: 0.65, ease: "expo.out" }, s + 0.4);
+        tl.fromTo("#intro-card .intro-bar",
+          { scaleX: 0, opacity: 0 },
+          { scaleX: 1, opacity: 1, duration: 0.55, ease: "power3.out" }, s + 0.7);
+        tl.fromTo("#intro-card .card-glow",
+          { scale: 0.9, opacity: 0.6 },
+          { scale: 1.12, opacity: 1, duration: d, ease: "sine.inOut" }, s);
+      }
+
+      // ===== アウトロカード =====
+      const outro = document.getElementById("outro-card");
+      if (outro) {
+        const s = parseFloat(outro.dataset.start);
+        const d = parseFloat(outro.dataset.duration);
+        const fadeIn = parseFloat(outro.dataset.fadeIn || "0.8");
+        tl.fromTo("#outro-card .scene-inner", { opacity: 0 }, { opacity: 1, duration: fadeIn, ease: "power1.inOut" }, s);
+        tl.fromTo("#outro-card .outro-title",
+          { opacity: 0, y: 30 },
+          { opacity: 1, y: 0, duration: 0.6, ease: "expo.out" }, s + fadeIn * 0.6);
+        tl.fromTo("#outro-card .outro-sub",
+          { opacity: 0, y: 18 },
+          { opacity: 1, y: 0, duration: 0.6, ease: "power2.out" }, s + fadeIn * 0.6 + 0.25);
+        tl.fromTo("#outro-card .card-glow",
+          { scale: 0.92, opacity: 0.5 },
+          { scale: 1.08, opacity: 1, duration: d, ease: "sine.inOut" }, s);
+      }
+
+      // センチネル: レンダラーが最終tween以降で打ち切らないよう全尺までタイムラインを延長
+      tl.set({}, {}, parseFloat(document.getElementById("root").dataset.duration));
     </script>
   </body>
 </html>
