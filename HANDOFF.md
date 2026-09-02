@@ -20,11 +20,13 @@
 - **HyperFrames CLI** 0.7.108 → 0.8.24、`requirements.txt` バージョン固定
 - **ドキュメント**: `AGENTS.md`（= `CLAUDE.md`）を AntiGravity 向け運用手順書に全面改訂（手順・WARN/FAIL 対処表・やってはいけないこと）。README も実態に更新
 - **検証**: 2プロジェクト（test-project 4枚 / テスト動画 8枚中4枚に台本）で E2E 通過、-14.0 LUFS、決定性（同一入力で index.html の md5 一致）確認済み
+- **BGM「3候補 → 選ぶ」ワークフロー（2026-09-02 追加）**: `./run.sh --bgm-candidates --project X` が Openverse API（CC BY / CC0 のみ・無料・キー不要）＋手持ちライブラリから3曲を集め、冒頭20秒の「ナレーション＋BGM」プレビューを `output/X/bgm_candidates/` に書き出す。`./run.sh --bgm-choose N --project X` で採用 → `assets/bgm/<mood>/` に保存・sidecar JSON・`LICENSES.md` 追記・台本先頭に `# BGM:`・`output/X/credits.txt`（概要欄用クレジット）。本番の品質ゲートに `クレジット` 行を追加。HeyGen 無料枠は規約で商用不可のため不採用。持続音閾値 `qa.bgm_lra_min` は 1.5→1.2（本物のループ曲が 1.3〜1.7 のため）
 
 ## 3. 次にやること
 
 - [ ] **いっちゃん**: Fish Audio の新 API キーを発行し `.env` の `FISH_AUDIO_API_KEY` を差し替え（fish.audio → Settings → API Keys）。差し替え後 `./run.sh --project test-project` で `TTS: fish` の PASS を確認
-- [ ] **いっちゃん**: フリー BGM（DOVA-SYNDROME 等・商用可・ボーカルなし・15秒以上）を `assets/bgm/relaxing/` `upbeat/` `serious/` に各2〜3曲投入し `assets/bgm/LICENSES.md` に記録。投入後に1本生成して耳で確認（品質ゲートの `BGMバランス` が声より 6dB 以上下がっていれば OK）
+- [ ] **いっちゃん**: test-project の BGM 候補3曲（送付済みプレビュー）から番号を決める（検証用に仮で 2 番を採用済み。変更は `./run.sh --bgm-choose N --project test-project` → `./run.sh --project test-project`）
+- [ ] （任意）手持ちのフリー BGM を `assets/bgm/<mood>/` に置くと候補に混ざる（`LICENSES.md` に記録）
 - [ ] Git編集ルームのクローン `~/プロジェクト/Git編集ルーム/slide-to-video-ai` は統合済みなので削除候補（いっちゃん判断）
 - [ ] （任意）TOALU 不動産ショート動画生成ツールの BGM 5曲も同じ合成ドローン → 別途対応
 - [ ] （任意）Google Fonts のローカル同梱（オフライン環境向け。現状はレンダ時にネット取得）
@@ -37,12 +39,16 @@
 - 参考動画 `Video Project 3.mp4`（目指す完成イメージ）はルートに git 管理外で保持。`git pull` で消えることはもう無い（追跡解除済み）
 - 動画に台本の無いスライドは入らない（WARN で通知）。テスト動画は 8枚中 4枚のみ台本あり
 - lint は wav の**実長**でクリップ重なりを判定する → 音声の `data-duration` は ms 切り上げ（`math.ceil`）にしてある。切り捨てに戻すと `duplicate_audio_track` が再発する
+- Openverse API は**遅い・不安定**（18秒かかる／504・500 が出ることがある）。`search_openverse` は 45秒タイムアウト＋1回リトライ、失敗しても手持ちライブラリだけで続行する。検索語は**単語1つ**が有効（2語以上の AND 検索は 0 件になりやすい）。`pdm` をライセンス指定に含めると 0 件
+- `--bgm-choose` は `inbox/<X>/script.md` の先頭 `# BGM:` 行だけを書き換える（本文は触らない）
+- 候補検索は毎回結果が変わりうるが、選んだ曲はローカル保存されるので本番生成は決定的
 
 ## 5. 主要ファイル
 
 | ファイル | 役割 |
 |---------|------|
-| `src/main.py` | パイプライン本体（preflight → parse → TTS → compose → render → mix → quality_gate） |
+| `src/main.py` | パイプライン本体（preflight → parse → TTS → compose → render → mix → quality_gate）＋ `bgm_candidates` / `bgm_choose` |
+| `src/bgm_search.py` | Openverse 検索・スコアリング（vocal 除外・速度タグ・作者重複なし）・DL 検証・sidecar JSON・クレジット文 |
 | `src/template.html` | コンポジション（CSS / GSAP） |
 | `src/video-style.json` | 全既定値・プリセット・品質ゲート閾値 |
 | `AGENTS.md` = `CLAUDE.md` | AI 向け運用手順書（対処表つき） |
@@ -59,6 +65,8 @@
 cd hyperframes-app && npm run check                # エラー 0（警告は timeline_track_too_dense のみ許容）
 ffmpeg -i output/test-project/final.mp4 -af ebur128 -f null - 2>&1 | tail -8   # I: -14.0 LUFS
 open output/test-project/contact_sheet.jpg         # テロップ切れ・黒帯・強調色・イントロ/アウトロ
+./run.sh --bgm-candidates --project test-project    # 3本の 20s プレビュー（-14 LUFS 付近）と candidates.md
+./run.sh --bgm-choose 2 --project test-project      # assets/bgm/<mood>/ に保存・LICENSES.md・# BGM: 行・credits.txt
 ```
 
 決定性: 同じ入力で2回コンポジション生成し `md5 -q hyperframes-app/index.html` が一致すること（TTS はキャッシュされるため2回目以降は完全一致）。
@@ -71,3 +79,4 @@ open output/test-project/contact_sheet.jpg         # テロップ切れ・黒帯
 | d66f792 | HyperFrames CLI 0.8.24 |
 | 130a8ab | パイプライン改修（文単位TTS・BGMベッド・品質ゲート・preflight） |
 | 7e8f256 | AGENTS.md / README / run.sh / HANDOFF 更新 |
+| 891be83 | BGM「3候補→選ぶ」（Openverse・プレビュー・credits・BGMバランス計測） |

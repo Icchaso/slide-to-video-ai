@@ -51,7 +51,7 @@ choco install python nodejs ffmpeg poppler -y
 1. セットアップスクリプトを実行：
    - **Mac**: `./setup.sh`
    - **Windows**: `setup.bat` をダブルクリック
-2. **BGM を入れる**（重要）：`assets/bgm/relaxing/` `upbeat/` `serious/` に、商用利用可の音楽ファイル（mp3 など）を各2〜3曲置く。条件と入手先は [`assets/bgm/README.md`](assets/bgm/README.md)。入れないと BGM なしの動画になります。
+2. **BGM**：動画ごとに「3候補から選ぶ」機能があるので事前準備は不要です（下記「BGM を選ぶ」）。手持ちの曲を使いたい場合は `assets/bgm/relaxing/` `upbeat/` `serious/` に置けば候補に混ざります（条件は [`assets/bgm/README.md`](assets/bgm/README.md)）。
    ※ 音楽ファイルは git に上がりません（公開リポジトリのため再配布を避ける）。**動画を作る PC ごとに置いてください**
 3. （任意）高品質 TTS を使う場合は `.env.example` をコピーして `.env` を作り、Fish Audio の API キーを設定：
    ```env
@@ -79,6 +79,12 @@ inbox/
 - **Windows**: `run.bat` をダブルクリック
 - AI エージェントに頼む場合: 「inbox の素材で動画を作って、品質ゲートの結果を教えて」
 
+### 2.5 BGM を選ぶ（3候補から）
+
+AI に「BGM 候補を出して」と頼む（または `./run.sh --bgm-candidates --project 新商品紹介`）と、台本の雰囲気に合う **3曲** を無料の CC 音源（Openverse 経由の Jamendo / Freesound、CC BY / CC0 のみ）と手持ちの曲から集め、**冒頭20秒のナレーション＋BGM のプレビュー**を `output/新商品紹介/bgm_candidates/` に書き出します。
+
+聴いて「2番で」と伝えると（`./run.sh --bgm-choose 2 --project 新商品紹介`）、曲が保存され、台本に `# BGM: …` が書かれ、**概要欄用のクレジット文 `credits.txt`** ができます。CC BY の曲は動画の概要欄にこの1行を貼ってください（CC0 なら不要）。気に入らなければ `--bgm-query "ukulele"` のように英語の検索語を変えて出し直せます。
+
 ### 3. 結果を確認する
 
 `output/新商品紹介/` に以下ができます：
@@ -86,6 +92,7 @@ inbox/
 | ファイル | 用途 |
 |---|---|
 | `final.mp4` | 完成動画 |
+| `credits.txt` | BGM のクレジット（CC BY の曲を使ったときに概要欄へ貼る1行） |
 | `contact_sheet.jpg` | 12コマの確認用画像。**開くだけで全体の見た目が分かる** |
 | `build_summary.json` | 品質ゲートの結果（`status`: PASS / WARN / FAIL と各チェックの詳細） |
 
@@ -112,7 +119,7 @@ WARN・FAIL の意味と対処は [`AGENTS.md`](AGENTS.md) の対処表を参照
 |------|------|
 | `# Title: ...` | イントロカードに表示するタイトル（省略時はフォルダ名） |
 | `# Style: ...` | 雰囲気プリセット（下記。省略時は modern） |
-| `# BGM: ...` | BGM の指定。`relaxing` / `upbeat` / `serious`（フォルダ）、ファイル名、`none`（BGM なし）。省略時は台本から自動判定 |
+| `# BGM: ...` | BGM の指定。`relaxing` / `upbeat` / `serious`（フォルダ）、ファイル名、`none`（BGM なし）。「BGM を選ぶ」で選ぶと自動で書かれる。省略時は台本から自動判定 |
 | `# Slide 1` | ここから下がスライド1のナレーション。**文は「。！？」で区切る**（文ごとに音声化・テロップ同期） |
 | `**強調**` | テロップで黄色ハイライト（音声には影響しない） |
 
@@ -143,7 +150,7 @@ WARN・FAIL の意味と対処は [`AGENTS.md`](AGENTS.md) の対処表を参照
 |------|------|------|
 | 音量 | 統合ラウドネス -14 LUFS ±0.7（±1.5 超で FAIL）/ トゥルーピーク -1.5 dBTP | YouTube 等の配信基準 |
 | BGM | ナレーションより約 20dB 下（事前 -18dB ＋ サイドチェインダッキング 8:1）。フェードイン 2秒 / アウト 4秒。継ぎ目はクロスフェード | 映像音響の実務値 |
-| BGM 素材 | 抑揚のない持続音（LRA < 1.5 LU）は警告 | 合成音が混入した過去の事故の再発防止 |
+| BGM 素材 | 抑揚のない持続音（LRA < 1.2 LU）は警告 | 合成音が混入した過去の事故の再発防止 |
 | テロップ | 1行16文字 × 2行以内、白文字＋黒縁＋半透明帯、音声より 80ms 先行して即時表示、改行は読点＞助詞境界 | 放送・映像翻訳業界の基準 |
 | 映像 | Ken Burns 6%（方向ローテーション）、クロスフェード 0.6秒、黒帯なし（ぼかし背景） | 文字スライドが破綻しない上限 |
 | 尺 | 期待値 ±1.5 秒 | レンダ欠落の検知 |
@@ -158,7 +165,8 @@ WARN・FAIL の意味と対処は [`AGENTS.md`](AGENTS.md) の対処表を参照
 |------|------|
 | 「仮想環境が見つかりません」 | 先に `setup.sh` / `setup.bat` を実行 |
 | 終了コード 2（環境不足） | 画面に出た `brew install ...` / `choco install ...` を実行して再実行 |
-| BGM が入っていない | `assets/bgm/<mood>/` に音楽ファイルを追加（`assets/bgm/README.md`） |
+| BGM が入っていない | 「BGM 候補を出して」→ 選ぶ（`./run.sh --bgm-candidates` → `--bgm-choose N`）。または `assets/bgm/<mood>/` に曲を追加 |
+| BGM 候補が出ない・「検索失敗」 | Openverse API が遅い/落ちていることがある（自動リトライ済み）。数分後に再実行。`--bgm-query "英語"` で検索語を変えるのも有効 |
 | BGM が「ブーン」と鳴る | 置いた素材が音楽ではなく合成音・環境音。品質ゲートの `BGM: 持続音の可能性` 警告が目印。曲を差し替える |
 | 音声が edge-tts になった（WARN） | `.env` の Fish Audio キーが失効または残高不足。新しいキーを発行して差し替え |
 | 音声が無音（FAIL） | ネット接続を確認（TTS はオンライン生成） |
@@ -166,6 +174,21 @@ WARN・FAIL の意味と対処は [`AGENTS.md`](AGENTS.md) の対処表を参照
 | フォントが崩れる | Google Fonts をレンダ時に取得するため**オフラインでは Noto Sans JP が使えません**（既知の制約） |
 
 ---
+
+## リポジトリを更新して直ったことを確認する（共有された人向け）
+
+AntiGravity のチャットに次をそのまま貼ってください（ファイル名は自分の素材に合わせる）：
+
+```
+このリポジトリを最新にして（git pull origin main）、./run.sh --check で環境を確認して。
+問題なければ inbox の素材で BGM 候補を3つ出して、プレビューのパスと曲名を教えて。
+私が番号を選んだら動画を作って、品質ゲートの結果（status・BGM の曲名・LUFS・WARN/FAIL）を報告して。
+```
+
+確認ポイント：`output/<動画名>/build_summary.json` の `BGM` が **PASS（曲名・LRA が数 LU 以上）**、`BGMバランス` が **PASS（差 15〜20 dB）** なら、以前の「ブーン」（合成音・LRA 1 未満）は解消しています。`credits.txt` があれば概要欄に貼ってください。
+
+- 初回はセットアップが必要です（上の「必要なもの」「セットアップ」）。Fish Audio のキーが無くても無料の edge-tts で動きます
+- 動作確認は Mac（Apple Silicon）で実施済み。Windows は同じ手順（`run.bat`）で動く設計ですが未実測です
 
 ## 仕組み（開発者・AI エージェント向け）
 
