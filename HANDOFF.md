@@ -80,3 +80,4 @@ open output/test-project/contact_sheet.jpg         # テロップ切れ・黒帯
 | 130a8ab | パイプライン改修（文単位TTS・BGMベッド・品質ゲート・preflight） |
 | 7e8f256 | AGENTS.md / README / run.sh / HANDOFF 更新 |
 | 891be83 | BGM「3候補→選ぶ」（Openverse・プレビュー・credits・BGMバランス計測） |
+| b8f6fda | AGENTS/README/HANDOFF 更新（候補ワークフロー・共有相手向け確認手順） |
