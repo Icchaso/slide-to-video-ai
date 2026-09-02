@@ -73,8 +73,42 @@
     "loudness_tolerance_warn": 0.7,
     "loudness_tolerance_fail": 1.5,
     "true_peak_fail_dbtp": -1.0,
-    "bgm_lra_min": 1.5,
+    "bgm_lra_min": 1.2,
     "contact_sheet_frames": 12
+  },
+  "bgm_search": {
+    "enabled": true,
+    "count": 3,
+    "licenses": [
+      "by",
+      "cc0"
+    ],
+    "min_seconds": 30,
+    "max_seconds": 360,
+    "preview_seconds": 20,
+    "page_size": 20,
+    "queries": {
+      "relaxing": [
+        "calm",
+        "ambient",
+        "acoustic",
+        "relaxing"
+      ],
+      "upbeat": [
+        "upbeat",
+        "happy",
+        "corporate",
+        "energetic"
+      ],
+      "serious": [
+        "inspiring",
+        "documentary",
+        "piano",
+        "cinematic"
+      ]
+    },
+    "timeout_seconds": 45,
+    "max_queries": 3
   },
   "presets": {
     "modern": {},

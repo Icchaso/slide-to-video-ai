@@ -37,6 +37,9 @@ from dotenv import load_dotenv
 from pdf2image import convert_from_path
 from PIL import Image
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import bgm_search  # noqa: E402  Openverse 検索・sidecar・クレジット
+
 load_dotenv()
 
 # --- パス定義 ---
@@ -1213,8 +1216,13 @@ def apply_ffmpeg_processing(video_title, render_video, style, parsed_data, sfx_e
     sfx_cfg = style.get("sfx", {})
     mood = determine_mood(parsed_data.get('script_blocks', []))
     bgm_path, used_mood = select_bgm(video_title, mood, style, parsed_data.get("bgm_hint"))
-    bgm_info = {"mood_detected": mood, "mood_used": used_mood, "file": None}
+    bgm_info = {"mood_detected": mood, "mood_used": used_mood, "file": None, "credit": ""}
     log(f"   - ムード判定: {mood} → 使用: {used_mood} / BGM: {bgm_path.name if bgm_path else 'なし'}")
+    if bgm_path:
+        sidecar = bgm_search.read_sidecar(bgm_path)
+        if sidecar:
+            bgm_info["credit"] = bgm_search.credits_text(sidecar)
+            bgm_info["license"] = bgm_search.license_label(sidecar)
 
     bed = None
     if bgm_path:
@@ -1354,9 +1362,13 @@ def quality_gate(ctx):
             if v is not None and g is not None:
                 add("BGMバランス", "PASS" if (v - g) >= 6 else "WARN",
                     f"ナレーション中 {v:.1f} dB / 無声区間 {g:.1f} dB（差 {v - g:.1f} dB）")
+        if bgm.get("credit"):
+            add("クレジット", "PASS", f"{bgm.get('license')} → output の credits.txt を動画の概要欄に貼ってください")
+        else:
+            add("クレジット", "PASS", "出典情報なし（手持ち曲）。assets/bgm/LICENSES.md で条件を確認してください")
     else:
         add("BGM", "WARN" if bgm.get("mood_used") != "none" else "PASS",
-            "BGM なし" + ("" if bgm.get("mood_used") == "none" else "（assets/bgm/ に音楽ファイルを追加してください）"))
+            "BGM なし" + ("" if bgm.get("mood_used") == "none" else "（./run.sh --bgm-candidates で候補を出すか assets/bgm/ に音楽を追加してください）"))
 
     tts = ctx["tts_info"]
     if tts["fallbacks"]:
@@ -1397,6 +1409,201 @@ def quality_gate(ctx):
 
 
 # =====================================================================
+# 8. BGM 候補（3曲プレビュー → 選択）
+# =====================================================================
+
+def resolve_mood(parsed, style):
+    """select_bgm と同じ優先順でムードを決める: 台本 `# BGM: <mood>` > プリセット bgm_mood > 台本判定"""
+    hint = (parsed.get("bgm_hint") or "").strip().lower()
+    if hint in MOODS:
+        return hint
+    override = style["audio"].get("bgm_mood", "auto")
+    if override and override != "auto" and override in MOODS:
+        return override
+    return determine_mood(parsed.get("script_blocks", []))
+
+
+def _probe_track(path):
+    return ffprobe_duration(path), measure_ebur128(path)["LRA"]
+
+
+def bgm_candidates(video_title, base_style, query=None, count=3):
+    """台本のムードに合う BGM を手持ち＋Openverse から集め、冒頭プレビュー（ナレーション＋BGM）を書き出す"""
+    project_work = WORK_DIR / video_title
+    project_work.mkdir(parents=True, exist_ok=True)
+    set_log_file(project_work / "bgm_candidates.log")
+    log(f"--- BGM 候補出し: {video_title} ---")
+    parsed = parse_input(video_title)
+    style = resolve_style(base_style, parsed.get("preset"), parsed.get("project_style"))
+    cfg = style.get("bgm_search", {})
+    mood = resolve_mood(parsed, style)
+    min_sec = float(cfg.get("min_seconds", 30))
+    min_lra = float(style.get("qa", {}).get("bgm_lra_min", 1.2))
+    log(f"   - ムード: {mood} / 候補数: {count}")
+
+    candidates = []
+    # 手持ちライブラリから最大1曲（タイトルhashで決定的）
+    local = [f for f in list_bgm_files(ASSETS_DIR / "bgm" / mood) if ffprobe_duration(f) >= min_sec]
+    if local:
+        f = local[int(hashlib.sha256(video_title.encode("utf-8")).hexdigest(), 16) % len(local)]
+        sc = bgm_search.read_sidecar(f) or {}
+        candidates.append({
+            "source": "local", "path": str(f), "slug": f.stem, "mood": mood,
+            "title": sc.get("title") or f.stem, "creator": sc.get("creator") or "（手持ち）",
+            "license": sc.get("license") or "", "license_label": bgm_search.license_label(sc) if sc else "手持ち（LICENSES.md 参照）",
+            "duration_s": round(ffprobe_duration(f), 1), "provider": sc.get("provider") or "local",
+            "source_url": sc.get("source_url") or "", "attribution": sc.get("attribution") or "",
+        })
+        log(f"   - 手持ちライブラリから: {f.name}")
+
+    # Openverse で残りを充足
+    need = count - len(candidates)
+    if need > 0 and cfg.get("enabled", True):
+        # 検索語は最大3つ分をまとめて集めてからスコア上位を選ぶ（1語だけだと曲調が偏る）
+        queries = [query] if query else list(cfg.get("queries", {}).get(mood) or bgm_search.MOOD_QUERIES[mood])
+        queries = queries[:int(cfg.get("max_queries", 3))]
+        tracks = []
+        for q in queries:
+            found = bgm_search.search_openverse(q, cfg, log)
+            if found is None:  # 接続不可（残りの検索語は試しても無駄）
+                log("   [WARNING] Openverse に接続できないため、手持ちライブラリだけで候補を作ります")
+                break
+            tracks += found
+        picked = bgm_search.pick_candidates(tracks, need + 4, mood, cfg)
+        picked_paths = []
+        for t in picked:
+            p = bgm_search.download_track(t, WORK_DIR / "_bgm_cache", _probe_track, log, min_lra, min_sec)
+            if p:
+                picked_paths.append((t, p))
+            if len(picked_paths) >= need:
+                break
+        for t, p in picked_paths[:need]:
+            candidates.append({
+                "source": "openverse", "path": str(p), "cache_path": str(p), "slug": bgm_search.slug_for(t), "mood": mood,
+                "title": t["title"], "creator": t["creator"], "license": t["license"],
+                "license_label": bgm_search.license_label(t), "duration_s": t["duration_s"], "lra": t.get("lra"),
+                "provider": t["provider"], "source_url": t["source_url"], "attribution": t["attribution"],
+                "url": t["url"], "id": t["id"], "license_version": t["license_version"], "license_url": t["license_url"],
+                "tags": t["tags"][:8],
+            })
+    if not candidates:
+        log("   [ERROR] 候補が見つかりません。--bgm-query で検索語を変えるか、assets/bgm/<mood>/ に曲を追加してください")
+        return EXIT_QA_FAIL
+
+    # プレビュー用ナレーション: 先頭ブロックから preview_seconds ぶん（足りなければ次のブロックも結合。TTS はキャッシュ再利用）
+    target = float(cfg.get("preview_seconds", 20))
+    audio_data, _ = generate_tts(parsed["script_blocks"][:4], video_title, style)
+    parts, total = [], 0.0
+    for a in audio_data:
+        parts.append(a)
+        total += a["duration"]
+        if total >= target:
+            break
+    if len(parts) == 1:
+        voice = Path(parts[0]["audio_path"])
+    else:
+        voice = project_work / "preview_voice.wav"
+        inputs = []
+        for a in parts:
+            inputs += ["-i", a["audio_path"]]
+        chain = "".join(f"[{k}:a]" for k in range(len(parts)))
+        run_ffmpeg(inputs + ["-filter_complex", f"{chain}concat=n={len(parts)}:v=0:a=1[out]",
+                             "-map", "[out]", "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", voice])
+    preview_len = min(target, max(5.0, total))
+    a = style["audio"]
+    out_dir = OUTPUT_DIR / video_title / "bgm_candidates"
+    if out_dir.exists():
+        for old in out_dir.glob("*"):
+            old.unlink()
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for i, c in enumerate(candidates, 1):
+        bed, _info = build_bgm_bed(Path(c["path"]), preview_len, style, project_work)
+        preview = out_dir / f"{i}_{c['slug']}.mp3"
+        run_ffmpeg(["-i", voice, "-i", bed, "-filter_complex",
+                    f"[0:a]atrim=0:{preview_len:.3f},asetpts=PTS-STARTPTS,asplit=2[vo][sc];"
+                    f"[1:a][sc]sidechaincompress=threshold={a.get('duck_threshold', 0.03)}:ratio={a.get('duck_ratio', 8)}:"
+                    f"attack={a.get('duck_attack_ms', 20)}:release={a.get('duck_release_ms', 400)}[duck];"
+                    f"[vo][duck]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,"
+                    f"loudnorm=I={a.get('loudness_target_lufs', -14)}:TP={a.get('loudness_true_peak', -1.5)}[out]",
+                    "-map", "[out]", "-ar", "48000", "-c:a", "libmp3lame", "-b:a", "160k", preview])
+        c["number"] = i
+        c["preview"] = str(preview)
+
+    (out_dir / "candidates.json").write_text(json.dumps(candidates, ensure_ascii=False, indent=2), encoding="utf-8")
+    lines = [f"# BGM 候補（{video_title} / ムード: {mood}）", "",
+             "| # | 曲名 | 作者 | ライセンス | 長さ | 出典 | プレビュー |", "|---|---|---|---|---|---|---|"]
+    for c in candidates:
+        lines.append(f"| {c['number']} | {c['title']} | {c['creator']} | {c['license_label']} | {c['duration_s']:.0f}s | "
+                     f"{c['provider']} {c['source_url']} | {c['preview']} |")
+    lines += ["", f"選ぶ: `./run.sh --bgm-choose <番号> --project {video_title}`"]
+    (out_dir / "candidates.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log("=== BGM 候補 ===")
+    for c in candidates:
+        log(f"  [{c['number']}] {c['title']} / {c['creator']} / {c['license_label']} / {c['duration_s']:.0f}s / {c['provider']}")
+        log(f"      プレビュー: {c['preview']}")
+    log(f"  一覧: {out_dir / 'candidates.md'}")
+    log(f"  次: ./run.sh --bgm-choose <番号> --project {video_title}")
+    set_log_file(None)
+    return EXIT_OK
+
+
+def bgm_choose(video_title, n):
+    """候補 n を採用: assets/bgm/<mood>/ に保存・LICENSES.md 追記・台本に # BGM: 行・credits.txt"""
+    import datetime
+    cands_path = OUTPUT_DIR / video_title / "bgm_candidates" / "candidates.json"
+    if not cands_path.exists():
+        log(f"[ERROR] 候補がありません。先に ./run.sh --bgm-candidates --project {video_title} を実行してください")
+        return EXIT_ERROR
+    cands = json.loads(cands_path.read_text(encoding="utf-8"))
+    if not (1 <= n <= len(cands)):
+        log(f"[ERROR] 番号は 1〜{len(cands)} で指定してください")
+        return EXIT_ERROR
+    c = cands[n - 1]
+    mood = c["mood"]
+    if c["source"] == "local":
+        dest = Path(c["path"])
+    else:
+        dest = ASSETS_DIR / "bgm" / mood / f"{c['slug']}.mp3"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if not dest.exists():
+            shutil.copy2(c["path"], dest)
+        bgm_search.write_sidecar(dest, c)
+        lic_md = ASSETS_DIR / "bgm" / "LICENSES.md"
+        existing = lic_md.read_text(encoding="utf-8") if lic_md.exists() else ""
+        if dest.name not in existing:
+            row = bgm_search.licenses_md_row(dest.name, mood, c, datetime.date.today().isoformat())
+            with open(lic_md, "a", encoding="utf-8") as f:
+                f.write(row + "\n")
+    # 台本の先頭 `# BGM:` 行だけを更新（本文は触らない）
+    script = None
+    for cand in [INBOX_DIR / video_title / "script.md"] + sorted((INBOX_DIR / video_title).glob("*.md")):
+        if cand.exists():
+            script = cand
+            break
+    content = script.read_text(encoding="utf-8")
+    directive = f"# BGM: {dest.name}"
+    if re.search(r'^#+\s*BGM\s*[:：].*$', content, re.MULTILINE | re.IGNORECASE):
+        content = re.sub(r'^#+\s*BGM\s*[:：].*$', directive, content, count=1, flags=re.MULTILINE | re.IGNORECASE)
+    else:
+        content = directive + "\n" + content
+    script.write_text(content, encoding="utf-8")
+    sidecar = bgm_search.read_sidecar(dest)
+    credit = bgm_search.credits_text(sidecar) if sidecar else ""
+    out_dir = OUTPUT_DIR / video_title
+    out_dir.mkdir(parents=True, exist_ok=True)
+    if credit:
+        (out_dir / "credits.txt").write_text(credit + "\n", encoding="utf-8")
+    log(f"=== BGM 決定: [{n}] {c['title']} / {c['creator']} ({c['license_label']}) ===")
+    log(f"  保存先: {dest}")
+    log(f"  台本に追記: {directive}（{script.name}）")
+    if credit:
+        log(f"  概要欄用クレジット: {credit}")
+        log(f"  → {out_dir / 'credits.txt'}")
+    log(f"  次: ./run.sh --project {video_title}")
+    return EXIT_OK
+
+
+# =====================================================================
 # main
 # =====================================================================
 
@@ -1418,9 +1625,17 @@ def process_project(video_title, base_style, strict=False):
     probe = None
     intro = float(style.get("intro", {}).get("duration", 3.0)) if style.get("intro", {}).get("enabled", True) else 0.0
     st = audio_data[0].get("sentence_times") or []
-    if len(st) >= 2:
-        probe = {"voice_t": intro + st[0]["start"] + 0.3,
-                 "gap_t": intro + st[0]["end"] + 0.02}
+    tail = float(style["audio"].get("tail_silence", 0.6))
+    if st:
+        voice_t = intro + st[0]["start"] + 0.3
+        if len(st) >= 2:
+            gap_t = intro + st[0]["end"] + 0.02          # 文間の無音
+        elif len(audio_data) >= 2:
+            gap_t = intro + audio_data[0]["duration"] - tail * 0.6   # ブロック末尾の無音パディング
+        else:
+            gap_t = None
+        if gap_t is not None:
+            probe = {"voice_t": voice_t, "gap_t": gap_t}
 
     qa = quality_gate({
         "style": style, "final_video": final_video, "total": comp["total"],
@@ -1450,6 +1665,10 @@ def process_project(video_title, base_style, strict=False):
         dst = out_dir / "contact_sheet.jpg"
         shutil.copy2(qa["contact_sheet"], dst)
         summary["contact_sheet"] = str(dst)
+    if audio_info["bgm"].get("credit"):
+        credits_path = out_dir / "credits.txt"
+        credits_path.write_text(audio_info["bgm"]["credit"] + "\n", encoding="utf-8")
+        summary["credits"] = str(credits_path)
     for p in (project_work / "build_summary.json", out_dir / "build_summary.json"):
         p.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding='utf-8')
     log(f"--- プロジェクト処理完了: {video_title} [{qa['status']}] ---")
@@ -1461,6 +1680,10 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true", help="環境チェックだけ行って終了")
     parser.add_argument("--project", help="inbox 内の特定プロジェクトだけ処理")
     parser.add_argument("--strict", action="store_true", help="lint エラーがあればレンダリング前に停止")
+    parser.add_argument("--bgm-candidates", action="store_true", help="BGM 候補を3曲探してプレビューを書き出す（本番生成はしない）")
+    parser.add_argument("--bgm-choose", type=int, metavar="N", help="BGM 候補 N を採用して台本に # BGM: を書く")
+    parser.add_argument("--bgm-query", help="--bgm-candidates の検索語を指定（英語。例: 'upbeat ukulele'）")
+    parser.add_argument("--count", type=int, default=3, help="--bgm-candidates の候補数（既定 3）")
     args = parser.parse_args(argv)
 
     log("=== 自動制作パイプライン開始 ===")
@@ -1485,6 +1708,24 @@ def main(argv=None):
     if not projects:
         log("inbox に処理対象のプロジェクトがありません（inbox/<動画名>/ に PDF と script.md を置いてください）。")
         return EXIT_OK
+
+    if args.bgm_candidates or args.bgm_choose is not None:
+        if len(projects) != 1:
+            log(f"[ERROR] 対象が {len(projects)} 件あります。--project <動画名> で1つ指定してください: "
+                + ", ".join(d.name for d in sorted(projects)))
+            return EXIT_ERROR
+        title = projects[0].name
+        try:
+            if args.bgm_choose is not None:
+                return bgm_choose(title, args.bgm_choose)
+            return bgm_candidates(title, base_style, query=args.bgm_query, count=max(1, args.count))
+        except Exception as e:
+            import traceback
+            log(f"[ERROR] BGM 候補処理でエラー: {e}")
+            traceback.print_exc()
+            return EXIT_ERROR
+        finally:
+            set_log_file(None)
 
     results = []
     for project_dir in sorted(projects):
