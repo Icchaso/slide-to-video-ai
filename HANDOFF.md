@@ -62,3 +62,12 @@ open output/test-project/contact_sheet.jpg         # テロップ切れ・黒帯
 ```
 
 決定性: 同じ入力で2回コンポジション生成し `md5 -q hyperframes-app/index.html` が一致すること（TTS はキャッシュされるため2回目以降は完全一致）。
+
+## 7. 完了コミット（2026-09-02）
+
+| ハッシュ | 内容 |
+|---|---|
+| 5a4ec57 | BGM: 合成ドローン削除・フリー音楽運用 |
+| d66f792 | HyperFrames CLI 0.8.24 |
+| 130a8ab | パイプライン改修（文単位TTS・BGMベッド・品質ゲート・preflight） |
+| 7e8f256 | AGENTS.md / README / run.sh / HANDOFF 更新 |
