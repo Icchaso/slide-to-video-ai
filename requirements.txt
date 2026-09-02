@@ -1,5 +1,5 @@
-pdf2image
-requests
-python-dotenv
-python-docx
-edge-tts
+pdf2image==1.17.0
+requests==2.34.2
+python-dotenv==1.2.2
+python-docx==1.2.0
+edge-tts==7.2.8
