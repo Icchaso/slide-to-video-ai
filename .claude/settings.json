@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./run.sh)",
+      "Bash(./run.sh *)",
+      "Bash(ffmpeg *)",
+      "Bash(ffprobe *)",
+      "Bash(pdftoppm *)",
+      "Bash(cd hyperframes-app && npm run check)",
+      "Bash(open output/*)",
+      "Read(output/**)",
+      "Read(work/**)",
+      "Read(inbox/**)"
+    ],
+    "deny": [
+      "Read(.env)",
+      "Edit(hyperframes-app/index.html)"
+    ]
+  }
+}

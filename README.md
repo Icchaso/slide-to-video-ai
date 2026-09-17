@@ -1,7 +1,8 @@
 # Slide2Video AI Generator
 
 **スライド（PDF）と台本（テキスト）を入れるだけで、プロ品質のナレーション付き動画（MP4）が完成する**自動制作システムです。
-AntiGravity などの AI エージェントに「inbox の素材で動画を作って」と頼むだけで、生成から**品質チェック（品質ゲート）**まで自動で行われます。
+**Claude Code 専用**です。フォルダを Claude Code で開いて「動画作って」と送るだけで、生成・品質チェック（品質ゲート）に加え、**Claude が書き出したコマを見て手直し**してから報告します。
+AntiGravity から乗り換える方は [docs/AntiGravityからClaudeCodeへ.md](docs/AntiGravityからClaudeCodeへ.md) へ。
 
 ## 出来上がる動画の品質
 
@@ -77,7 +78,7 @@ inbox/
 
 - **Mac**: `./run.sh`
 - **Windows**: `run.bat` をダブルクリック
-- AI エージェントに頼む場合: 「inbox の素材で動画を作って、品質ゲートの結果を教えて」
+- Claude Code に頼む場合: 「inbox の素材で動画作って」
 
 ### 2.5 BGM を選ぶ（3候補から）
 
@@ -97,7 +98,7 @@ AI に「BGM 候補を出して」と頼む（または `./run.sh --bgm-candidat
 | `build_summary.json` | 品質ゲートの結果（`status`: PASS / WARN / FAIL と各チェックの詳細） |
 
 終了コード: `0`=OK（PASS または WARN）/ `1`=実行エラー / `2`=環境不足 / `3`=品質ゲート FAIL。
-WARN・FAIL の意味と対処は [`AGENTS.md`](AGENTS.md) の対処表を参照。
+WARN・FAIL の意味と対処は [`.claude/skills/make-video/SKILL.md`](.claude/skills/make-video/SKILL.md) の対処表を参照。
 
 ---
 
@@ -177,7 +178,7 @@ WARN・FAIL の意味と対処は [`AGENTS.md`](AGENTS.md) の対処表を参照
 
 ## リポジトリを更新して直ったことを確認する（共有された人向け）
 
-AntiGravity のチャットに次をそのまま貼ってください（ファイル名は自分の素材に合わせる）：
+Claude Code に次をそのまま送ってください（AntiGravity を使っていた方は先に [切り替え手順](docs/AntiGravityからClaudeCodeへ.md) へ）：
 
 ```
 このリポジトリを最新にして（git pull origin main）、./run.sh --check で環境を確認して。
@@ -190,7 +191,7 @@ AntiGravity のチャットに次をそのまま貼ってください（ファ�
 - 初回はセットアップが必要です（上の「必要なもの」「セットアップ」）。Fish Audio のキーが無くても無料の edge-tts で動きます
 - 動作確認は Mac（Apple Silicon）で実施済み。Windows は同じ手順（`run.bat`）で動く設計ですが未実測です
 
-## 仕組み（開発者・AI エージェント向け）
+## 仕組み（開発者向け）
 
 ```
 inbox/（PDF+台本）
@@ -206,4 +207,4 @@ inbox/（PDF+台本）
 - `hyperframes-app/index.html` は毎回自動生成されるので直接編集しない
 - 変更後は `cd hyperframes-app && npm run check` がエラー 0 になることを確認
 
-運用手順・WARN/FAIL 対処表・やってはいけないことは [`AGENTS.md`](AGENTS.md)（AI エージェント向け指示書）にまとめています。
+Claude Code 向けのルールと地図は [`CLAUDE.md`](CLAUDE.md)、動画を作る手順・WARN/FAIL 対処表は [`make-video` スキル](.claude/skills/make-video/SKILL.md)、仕上がりを見るレビュー役は [`video-reviewer`](.claude/agents/video-reviewer.md) にあります。
