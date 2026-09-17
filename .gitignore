@@ -41,3 +41,4 @@ assets/bgm/*/*
 
 # Voice recordings for cloning (personal biometric data; never commit)
 assets/voice/
+voice-sample/

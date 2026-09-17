@@ -7,9 +7,10 @@
 | Phase | 内容 | 状態 |
 |---|---|---|
 | 0 | CLAUDE.md（地図とルール）・`make-video` スキル・`video-reviewer` エージェント・`.claude/settings.json`・AGENTS.md を切り替え案内に・`docs/AntiGravityからClaudeCodeへ.md` | 完了 c339255 |
-| 1 | `storyboard.json`（場面ごとの subtitle: bottom/top/band/off）・`--draft`（全尺を書き出さず `hyperframes snapshot --at` でテロップごとのコマ → `work/<名前>/review/`）・「という」の途中で改行しない | 完了（下のコミット） |
-| 2 | 声: 読み方辞書 `reading.json`（音声だけ置換・テロップ不変）・`--voice-check`（文ごとに文字起こし→台本と**ひらがなの読み**で照合、⚠️=一致率<0.9 か2文字以上のずれ）・storyboard の `gap`（場面ごとの文間） | 完了（下のコミット）。**自分の声は未**: Fish の新キー＋録音1〜2分待ち → `POST /model`（private）で登録 → `.env` の `FISH_AUDIO_VOICE_ID` |
-| 2.5 | レイアウト標準（いっちゃん指定）: スライドは画面いっぱい、テロップは下20%（216px）の中に重ねる `band` が既定・文字52px・Ken Burns 既定オフ（全面スライドの端が切れるため）。スライドの中身は上80%に置く約束（スライドを作る側） | 完了（下のコミット） |
+| 1 | `storyboard.json`（場面ごとの subtitle: bottom/top/band/off）・`--draft`（全尺を書き出さず `hyperframes snapshot --at` でテロップごとのコマ → `work/<名前>/review/`）・「という」の途中で改行しない | 完了 2611d02 |
+| 2 | 声: 読み方辞書 `reading.json`（音声だけ置換・テロップ不変）・`--voice-check`（文ごとに文字起こし→台本と**ひらがなの読み**で照合、⚠️=一致率<0.9 か2文字以上のずれ）・storyboard の `gap`（場面ごとの文間） | 完了 b6aab39。**自分の声は未**: Fish の新キー＋録音1〜2分待ち → `POST /model`（private）で登録 → `.env` の `FISH_AUDIO_VOICE_ID` |
+| 2.5 | レイアウト標準（いっちゃん指定）: スライドは画面いっぱい、テロップは下20%（216px）の中に重ねる `band` が既定・文字52px・Ken Burns 既定オフ（全面スライドの端が切れるため）。スライドの中身は上80%に置く約束（スライドを作る側） | 完了 b6aab39 |
+| 2.9 | Fable 品質レビュー（11件）の反映: 「もっ\|と」改行の退行・100コマ超でコマと字幕の対応ずれ・辞書を入れると照合が常に⚠️・preflight に pykakasi・draft/voice-check のログ分離・SKILL/README の食い違い・`voice-sample/` を gitignore。**未反映 #10**: settings.json に `--voice-check` / `--bgm-candidates` の許可を足す案（許可範囲の拡大なのでいっちゃん判断待ち） | 完了（下のコミット） |
 | 3 | 演出: zoom / spotlight / marker（Claude がスライドを見て storyboard に書く）。全面スライドでも端が切れず下20%に食い込まない動きにする（Ken Burns は既定オフにした） | 未着手 |
 | 4 | README・判断記録・メモリ更新・共有相手への切り替え案内文 | 未着手 |
 

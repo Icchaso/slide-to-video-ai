@@ -253,6 +253,10 @@ def preflight_check(style):
         import edge_tts  # noqa: F401
     except ImportError:
         problems.append("edge-tts が未インストール → venv を有効化して `pip install -r requirements.txt`")
+    try:
+        import pykakasi  # noqa: F401  読み上げチェック（--voice-check）用
+    except ImportError:
+        problems.append("pykakasi が未インストール（git pull 後に増えた部品）→ `venv/bin/pip install -r requirements.txt`（Windows: `venv\\Scripts\\pip install -r requirements.txt`）")
     if not (APP_DIR / "package.json").exists():
         problems.append("hyperframes-app/package.json がありません → `./setup.sh`（Windows: `setup.bat`）を実行")
     if sys.version_info < (3, 10):
@@ -779,6 +783,14 @@ def _char_class(ch):
     return 'other'
 
 
+def _quotative_at(text, p):
+    """位置 p から引用の「という／といった／といって」が始まるか。
+    促音の直後（「もっ|といっぱい」「ちょっ|といった」）や「といっしょ」「といっても」は除く"""
+    return (p > 0 and text[p - 1] != 'っ'
+            and text.startswith(('という', 'といった', 'といって'), p)
+            and not text.startswith('といっても', p))
+
+
 def break_candidates(text):
     """改行候補を優先順のティアで返す（各ティアは位置のリスト）。
     1) 読点直後  2) ひらがな→非ひらがな遷移（文節境界の近似。「〜あたり|6時間」「〜によって|バラバラ」）
@@ -798,7 +810,7 @@ def break_candidates(text):
         if not (0 < p < n) or text[p - 1] in NO_BREAK_PREV or inside[p]:
             return False
         # 「という」「といった」はひとかたまり: 「増加と|いう」は切らず、「増加|という」は許す
-        quotative = text.startswith(('という', 'といっ'), p)
+        quotative = _quotative_at(text, p)
         if text[p] in NO_BREAK_NEXT and not quotative:
             return False
         if text[p - 1] == 'と' and text.startswith(('いう', 'いっ'), p):
@@ -810,7 +822,7 @@ def break_candidates(text):
 
     t1 = [m.end() for m in re.finditer('、', text)] + [p for p in range(1, n) if text[p - 1] in '」）)']
     t2 = [p for p in range(1, n) if _is_hira(text[p - 1]) and not _is_hira(text[p])]
-    t2 += [p for p in range(1, n) if text.startswith(('という', 'といっ'), p)]   # 「増加|という」
+    t2 += [p for p in range(1, n) if _quotative_at(text, p)]   # 「増加|という」
     t3 = [i + 1 for i, ch in enumerate(text[:-1]) if ch in PARTICLE_CHARS]
     t4 = [p for p in range(1, n) if _char_class(text[p - 1]) != _char_class(text[p])]
     return [[p for p in sorted(set(tier)) if ok(p)] for tier in (t1, t2, t3, t4)]
@@ -1783,7 +1795,7 @@ def voice_check(video_title, base_style):
 
     project_work = WORK_DIR / video_title
     project_work.mkdir(parents=True, exist_ok=True)
-    set_log_file(project_work / "run.log")
+    set_log_file(project_work / "voice_check.log")   # 本番の run.log を上書きしない
     log(f"--- 読み上げチェック: {video_title} ---")
     parsed = parse_input(video_title)
     style = resolve_style(base_style, parsed.get("preset"), parsed.get("project_style"))
@@ -1815,7 +1827,8 @@ def voice_check(video_title, base_style):
                 cache.write_text(json.dumps({"text": heard}, ensure_ascii=False), encoding="utf-8")
                 shutil.rmtree(tmp_dir)
             expected_kana = to_kana(seg["spoken"], kks)
-            heard_kana = to_kana(heard, kks)
+            # 聞き取り側にも同じ辞書を当てる（「1本」→「いっぽん」を辞書に書いたとき、文字起こしの「1本」を「いちほん」と読んで誤検出しないため）
+            heard_kana = to_kana(apply_readings(heard, parsed.get("readings") or {}), kks)
             sm = difflib.SequenceMatcher(None, expected_kana, heard_kana, autojunk=False)
             diffs = [f"「{expected_kana[i1:i2]}」→「{heard_kana[j1:j2]}」"
                      for op, i1, i2, j1, j2 in sm.get_opcodes() if op != "equal"]
@@ -1848,7 +1861,7 @@ def draft_review(video_title, base_style):
     出力: work/<動画名>/review/NNN_*.jpg と frames.json / frames.md（どのコマが何の場面か）"""
     project_work = WORK_DIR / video_title
     project_work.mkdir(parents=True, exist_ok=True)
-    set_log_file(project_work / "run.log")
+    set_log_file(project_work / "draft.log")   # 本番の run.log を上書きしない
     log(f"--- 下書き（自己レビュー用コマ）: {video_title} ---")
 
     parsed = parse_input(video_title)
@@ -1882,7 +1895,8 @@ def draft_review(video_title, base_style):
     run_command(get_pinned_cli() + ["snapshot", "--at", ",".join(f"{s['t']}" for s in shots),
                                     "--no-end", "--describe", "false", "-o", str(raw_dir.absolute()), "."],
                 cwd=str(APP_DIR))
-    raws = sorted(raw_dir.glob("frame-*.png"))
+    # snapshot の連番は2桁ゼロ埋め（frame-99, frame-100…）なので文字列順ではなく番号順に並べる
+    raws = sorted(raw_dir.glob("frame-*.png"), key=lambda p: int(p.name.split("-")[1]))
     if len(raws) != len(shots):
         raise RuntimeError(f"コマの枚数が合いません（予定 {len(shots)} / 実際 {len(raws)}）。{raw_dir} を確認してください")
 
