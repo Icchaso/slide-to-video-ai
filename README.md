@@ -52,7 +52,7 @@ choco install python nodejs ffmpeg poppler -y
 1. セットアップスクリプトを実行：
    - **Mac**: `./setup.sh`
    - **Windows**: `setup.bat` をダブルクリック
-2. **BGM**：動画ごとに「3候補から選ぶ」機能があるので事前準備は不要です（下記「BGM を選ぶ」）。手持ちの曲を使いたい場合は `assets/bgm/relaxing/` `upbeat/` `serious/` に置けば候補に混ざります（条件は [`assets/bgm/README.md`](assets/bgm/README.md)）。
+2. **BGM**：動画ごとに「集めた候補（おすすめ3曲＋ほか）から選ぶ」機能があるので事前準備は不要です（下記「BGM を選ぶ」）。手持ちの曲を使いたい場合は `assets/bgm/relaxing/` `upbeat/` `serious/` に置けば候補に混ざります（条件は [`assets/bgm/README.md`](assets/bgm/README.md)）。
    ※ 音楽ファイルは git に上がりません（公開リポジトリのため再配布を避ける）。**動画を作る PC ごとに置いてください**
 3. （任意）高品質 TTS を使う場合は `.env.example` をコピーして `.env` を作り、Fish Audio の API キーを設定：
    ```env
@@ -80,9 +80,9 @@ inbox/
 - **Windows**: `run.bat` をダブルクリック
 - Claude Code に頼む場合: 「inbox の素材で動画作って」
 
-### 2.5 BGM を選ぶ（3候補から）
+### 2.5 BGM を選ぶ（集めた候補から）
 
-AI に「BGM 候補を出して」と頼む（または `./run.sh --bgm-candidates --project 新商品紹介`）と、台本の雰囲気に合う **3曲** を無料の CC 音源（Openverse 経由の Jamendo / Freesound、CC BY / CC0 のみ）と手持ちの曲から集め、**冒頭20秒のナレーション＋BGM のプレビュー**を `output/新商品紹介/bgm_candidates/` に書き出します。
+AI に「BGM 候補を出して」と頼む（または `./run.sh --bgm-candidates --project 新商品紹介`）と、台本の雰囲気に合う曲を無料の CC 音源（Openverse 経由の Jamendo / Freesound、CC BY / CC0 のみ）と手持ちの曲から **最大8曲** 集め、曲調が重ならない **おすすめ3曲（理由つき）** と「ほかの候補」に分けて、全曲の**冒頭20秒のナレーション＋BGM のプレビュー**を `output/新商品紹介/bgm_candidates/` に書き出します。
 
 聴いて「2番で」と伝えると（`./run.sh --bgm-choose 2 --project 新商品紹介`）、曲が保存され、台本に `# BGM: …` が書かれ、**概要欄用のクレジット文 `credits.txt`** ができます。CC BY の曲は動画の概要欄にこの1行を貼ってください（CC0 なら不要）。気に入らなければ `--bgm-query "ukulele"` のように英語の検索語を変えて出し直せます。
 

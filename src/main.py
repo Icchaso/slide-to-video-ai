@@ -1639,7 +1639,7 @@ def quality_gate(ctx):
 
 
 # =====================================================================
-# 8. BGM 候補（3曲プレビュー → 選択）
+# 8. BGM 候補（広めに集める → おすすめ3曲＋ほか → 番号で選択）
 # =====================================================================
 
 def resolve_mood(parsed, style):
@@ -1658,7 +1658,8 @@ def _probe_track(path):
 
 
 def bgm_candidates(video_title, base_style, query=None, count=3):
-    """台本のムードに合う BGM を手持ち＋Openverse から集め、冒頭プレビュー（ナレーション＋BGM）を書き出す"""
+    """台本のムードに合う BGM を手持ち＋Openverse から広めに集め（pool_size 曲）、
+    スコア上位 count 曲を「おすすめ」として理由つきで出す。全曲に冒頭プレビュー（ナレーション＋BGM）を付け、どれでも番号で選べる"""
     project_work = WORK_DIR / video_title
     project_work.mkdir(parents=True, exist_ok=True)
     set_log_file(project_work / "bgm_candidates.log")
@@ -1669,61 +1670,114 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
     mood = resolve_mood(parsed, style)
     min_sec = float(cfg.get("min_seconds", 30))
     min_lra = float(style.get("qa", {}).get("bgm_lra_min", 1.2))
-    log(f"   - ムード: {mood} / 候補数: {count}")
+    pool_size = max(count, int(cfg.get("pool_size", 8)))
+    log(f"   - ムード: {mood} / おすすめ: {count}曲 / 集める: 最大{pool_size}曲")
 
-    candidates = []
-    # 手持ちライブラリから最大1曲（タイトルhashで決定的）
-    local = [f for f in list_bgm_files(ASSETS_DIR / "bgm" / mood) if ffprobe_duration(f) >= min_sec]
-    if local:
-        f = local[int(hashlib.sha256(video_title.encode("utf-8")).hexdigest(), 16) % len(local)]
+    # 動画の長さの見積もり（先頭4ブロックの音声から1文字あたりの秒数を出し、残りの文字数に掛ける。TTS はキャッシュ再利用）
+    target = float(cfg.get("preview_seconds", 20))
+    head_blocks = parsed["script_blocks"][:4]
+    audio_data, _ = generate_tts(head_blocks, video_title, style,
+                                 parsed.get("storyboard"), parsed.get("readings"))
+    head_sec = sum(a["duration"] for a in audio_data)
+    chars = lambda blocks: sum(len(b.get("text", "")) for b in blocks)
+    rest_chars = chars(parsed["script_blocks"][4:])
+    est_sec = head_sec + (head_sec / max(1, chars(head_blocks))) * rest_chars
+    for k in ("intro", "outro"):
+        if style.get(k, {}).get("enabled", True):
+            est_sec += float(style.get(k, {}).get("duration", 0))
+    log(f"   - 動画の長さの見積もり: 約{est_sec:.0f}秒")
+
+    pool, seen = [], set()
+
+    def remember(*keys):
+        new = [k for k in keys if k]
+        if any(k in seen for k in new):
+            return False
+        seen.update(new)
+        return True
+
+    # 手持ちライブラリ（以前選んだ曲）
+    for f in list_bgm_files(ASSETS_DIR / "bgm" / mood):
+        dur = ffprobe_duration(f)
+        if dur < min_sec:
+            continue
         sc = bgm_search.read_sidecar(f) or {}
-        candidates.append({
+        if not remember(sc.get("id"), sc.get("source_url"), f.stem):
+            continue
+        pool.append({
             "source": "local", "path": str(f), "slug": f.stem, "mood": mood,
             "title": sc.get("title") or f.stem, "creator": sc.get("creator") or "（手持ち）",
             "license": sc.get("license") or "", "license_label": bgm_search.license_label(sc) if sc else "手持ち（LICENSES.md 参照）",
-            "duration_s": round(ffprobe_duration(f), 1), "provider": sc.get("provider") or "local",
+            "duration_s": round(dur, 1), "provider": sc.get("provider") or "local",
             "source_url": sc.get("source_url") or "", "attribution": sc.get("attribution") or "",
+            "tags": sc.get("tags") or [], "lra": sc.get("lra"), "score": 2.0,
         })
-        log(f"   - 手持ちライブラリから: {f.name}")
+    if pool:
+        log(f"   - 手持ちライブラリから: {len(pool)}曲")
 
-    # Openverse で残りを充足
-    need = count - len(candidates)
+    # Openverse で広めに集める
+    need = pool_size - len(pool)
     if need > 0 and cfg.get("enabled", True):
-        # 検索語は最大3つ分をまとめて集めてからスコア上位を選ぶ（1語だけだと曲調が偏る）
+        # 検索語は最大 max_queries 個分をまとめて集めてからスコア上位を選ぶ（1語だけだと曲調が偏る）
         queries = [query] if query else list(cfg.get("queries", {}).get(mood) or bgm_search.MOOD_QUERIES[mood])
         queries = queries[:int(cfg.get("max_queries", 3))]
-        tracks = []
+        per_query = []
         for q in queries:
             found = bgm_search.search_openverse(q, cfg, log)
             if found is None:  # 接続不可（残りの検索語は試しても無駄）
                 log("   [WARNING] Openverse に接続できないため、手持ちライブラリだけで候補を作ります")
                 break
-            tracks += found
-        picked = bgm_search.pick_candidates(tracks, need + 4, mood, cfg)
-        picked_paths = []
-        for t in picked:
+            found = [dict(t, query=q) for t in found if t["id"] not in seen and t["source_url"] not in seen]
+            per_query.append(bgm_search.pick_candidates(found, need * 2 + 4, mood, cfg))
+        # 検索語ごとの上位を交互に並べる（1つの検索語の曲だけで埋まると曲調が偏る）。同じ作者は1曲まで
+        ordered, creators = [], set()
+        for i in range(max((len(x) for x in per_query), default=0)):
+            for lst in per_query:
+                if i < len(lst) and lst[i]["creator"].lower() not in creators:
+                    creators.add(lst[i]["creator"].lower())
+                    ordered.append(lst[i])
+        added = 0
+        for t in ordered:
             p = bgm_search.download_track(t, WORK_DIR / "_bgm_cache", _probe_track, log, min_lra, min_sec)
-            if p:
-                picked_paths.append((t, p))
-            if len(picked_paths) >= need:
-                break
-        for t, p in picked_paths[:need]:
-            candidates.append({
+            if not p or not remember(t["id"], t["source_url"]):
+                continue
+            pool.append({
                 "source": "openverse", "path": str(p), "cache_path": str(p), "slug": bgm_search.slug_for(t), "mood": mood,
                 "title": t["title"], "creator": t["creator"], "license": t["license"],
                 "license_label": bgm_search.license_label(t), "duration_s": t["duration_s"], "lra": t.get("lra"),
                 "provider": t["provider"], "source_url": t["source_url"], "attribution": t["attribution"],
                 "url": t["url"], "id": t["id"], "license_version": t["license_version"], "license_url": t["license_url"],
-                "tags": t["tags"][:8],
+                "tags": t["tags"][:8], "score": t["score"], "query": t.get("query", ""),
             })
-    if not candidates:
+            added += 1
+            if added >= need:
+                break
+    if not pool:
         log("   [ERROR] 候補が見つかりません。--bgm-query で検索語を変えるか、assets/bgm/<mood>/ に曲を追加してください")
         return EXIT_QA_FAIL
 
+    # 並べ替え: 適性スコア＋動画より長い曲（つなぎ目なし）を優先。同点は曲名順で決定的
+    for c in pool:
+        c["rank_score"] = c["score"] + (1.0 if c["duration_s"] >= est_sec else 0.0)
+        c["reason"] = bgm_search.reason_text(c, est_sec)
+    pool.sort(key=lambda c: (-c["rank_score"], c["title"].lower(), c["slug"]))
+    # おすすめは検索語（曲調）が重ならないように上から選び、足りなければスコア順で埋める
+    rec, used_q = [], set()
+    for c in pool:
+        q = c.get("query") or c["source"]
+        if len(rec) < count and q not in used_q:
+            rec.append(c)
+            used_q.add(q)
+    rec += [c for c in pool if c not in rec][:count - len(rec)]
+    for c in pool:
+        c["recommended"] = c in rec
+    current = (parsed.get("bgm_hint") or "").strip()
+    for c in pool:
+        if current and Path(c["path"]).name == current:
+            c["reason"] = "今この動画で使っている曲・" + c["reason"]
+    candidates = rec + [c for c in pool if c not in rec]
+
     # プレビュー用ナレーション: 先頭ブロックから preview_seconds ぶん（足りなければ次のブロックも結合。TTS はキャッシュ再利用）
-    target = float(cfg.get("preview_seconds", 20))
-    audio_data, _ = generate_tts(parsed["script_blocks"][:4], video_title, style,
-                                 parsed.get("storyboard"), parsed.get("readings"))
     parts, total = [], 0.0
     for a in audio_data:
         parts.append(a)
@@ -1761,16 +1815,21 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
         c["preview"] = str(preview)
 
     (out_dir / "candidates.json").write_text(json.dumps(candidates, ensure_ascii=False, indent=2), encoding="utf-8")
-    lines = [f"# BGM 候補（{video_title} / ムード: {mood}）", "",
-             "| # | 曲名 | 作者 | ライセンス | 長さ | 出典 | プレビュー |", "|---|---|---|---|---|---|---|"]
-    for c in candidates:
-        lines.append(f"| {c['number']} | {c['title']} | {c['creator']} | {c['license_label']} | {c['duration_s']:.0f}s | "
-                     f"{c['provider']} {c['source_url']} | {c['preview']} |")
+    row = lambda c: (f"| {c['number']} | {c['title']} | {c['creator']} | {c['license_label']} | {c['duration_s']:.0f}s | "
+                     f"{c['reason']} | {c['provider']} {c['source_url']} | {c['preview']} |")
+    head = ["| # | 曲名 | 作者 | ライセンス | 長さ | おすすめの理由 | 出典 | プレビュー |", "|---|---|---|---|---|---|---|---|"]
+    lines = [f"# BGM 候補（{video_title} / ムード: {mood} / 動画 約{est_sec:.0f}秒）", "", "## おすすめ", ""] + head
+    lines += [row(c) for c in candidates if c["recommended"]]
+    others = [c for c in candidates if not c["recommended"]]
+    if others:
+        lines += ["", "## ほかの候補（聴いて気に入ればこちらの番号でも選べる）", ""] + head + [row(c) for c in others]
     lines += ["", f"選ぶ: `./run.sh --bgm-choose <番号> --project {video_title}`"]
     (out_dir / "candidates.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     log("=== BGM 候補 ===")
     for c in candidates:
-        log(f"  [{c['number']}] {c['title']} / {c['creator']} / {c['license_label']} / {c['duration_s']:.0f}s / {c['provider']}")
+        mark = "★おすすめ" if c["recommended"] else "ほか"
+        log(f"  [{c['number']}] {mark} {c['title']} / {c['creator']} / {c['license_label']} / {c['duration_s']:.0f}s / {c['provider']}")
+        log(f"      理由: {c['reason']}")
         log(f"      プレビュー: {c['preview']}")
     log(f"  一覧: {out_dir / 'candidates.md'}")
     log(f"  次: ./run.sh --bgm-choose <番号> --project {video_title}")
@@ -2101,10 +2160,10 @@ def main(argv=None):
     parser.add_argument("--check", action="store_true", help="環境チェックだけ行って終了")
     parser.add_argument("--project", help="inbox 内の特定プロジェクトだけ処理")
     parser.add_argument("--strict", action="store_true", help="lint エラーがあればレンダリング前に停止")
-    parser.add_argument("--bgm-candidates", action="store_true", help="BGM 候補を3曲探してプレビューを書き出す（本番生成はしない）")
+    parser.add_argument("--bgm-candidates", action="store_true", help="BGM を広めに集め、おすすめ3曲（理由つき）＋ほかの候補のプレビューを書き出す（本番生成はしない）")
     parser.add_argument("--bgm-choose", type=int, metavar="N", help="BGM 候補 N を採用して台本に # BGM: を書く")
     parser.add_argument("--bgm-query", help="--bgm-candidates の検索語を指定（英語。例: 'upbeat ukulele'）")
-    parser.add_argument("--count", type=int, default=3, help="--bgm-candidates の候補数（既定 3）")
+    parser.add_argument("--count", type=int, default=3, help="--bgm-candidates のおすすめの曲数（既定 3。集める数は bgm_search.pool_size）")
     parser.add_argument("--voice-check", action="store_true",
                         help="音声を文字起こしして台本と読みを照合し work/<動画名>/voice_check.md に書く（読み間違いの検出）")
     parser.add_argument("--draft", action="store_true",

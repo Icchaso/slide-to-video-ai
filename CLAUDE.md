@@ -40,7 +40,7 @@ inbox/<動画名>/slides.pdf + script.md                   ← 入力（git 管�
 ./run.sh --draft --project <動画名>                # 下書き: テロップごとのコマを work/<動画名>/review/ に撮る（数十秒）
 ./run.sh --voice-check --project <動画名>          # 読み上げチェック: 文字起こしと台本を読みで照合 → work/<動画名>/voice_check.md
 ./run.sh --project <動画名>                        # 1本作る（数分。run_in_background で待つ）
-./run.sh --bgm-candidates --project <動画名> [--bgm-query "英語1語"]   # BGM 候補3曲＋プレビュー
+./run.sh --bgm-candidates --project <動画名> [--bgm-query "英語1語"]   # BGM を最大8曲集め、おすすめ3曲（理由つき）＋全曲プレビュー
 ./run.sh --bgm-choose N --project <動画名>         # 候補 N を採用
 ./run.sh --strict                                 # lint エラーでレンダ前に停止
 cd hyperframes-app && npm run check               # lint + runtime + layout + motion + contrast

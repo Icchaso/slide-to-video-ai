@@ -28,7 +28,8 @@ description: inbox/<動画名>/ のスライド（PDF）と台本（.md）から
 
 ### ② BGM（台本に `# BGM:` が無いとき）
 1. `./run.sh --bgm-candidates --project <動画名>`（数十秒〜数分。Openverse が遅い）
-2. 候補表（曲名／作者／ライセンス／長さ）とプレビュー `output/<動画名>/bgm_candidates/*.mp3` のパスを見せ、**番号を選んでもらう**
+   → フリー素材（CC BY / CC0）と手持ちから **最大8曲** を集め、曲調が重ならない **おすすめ3曲** と「ほかの候補」に分ける。全曲に冒頭20秒のナレーション＋BGM プレビューが付く（`output/<動画名>/bgm_candidates/candidates.md`）
+2. `candidates.md` の **おすすめ3曲を理由つき** で見せ、プレビューの mp3 を送る（SendUserFile）。ほかの候補も曲名だけ並べ、**どの番号でも選べる** と伝えて **番号を選んでもらう**（Claude は曲を聴けないので、理由はタグ・長さ・抑揚からの目安と添える）
 3. 「N番で」→ `./run.sh --bgm-choose N --project <動画名>`
 4. 気に入らなければ `--bgm-query "<英語1語>"` で出し直す
 

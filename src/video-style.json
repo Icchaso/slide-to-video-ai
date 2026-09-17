@@ -84,6 +84,7 @@
   "bgm_search": {
     "enabled": true,
     "count": 3,
+    "pool_size": 8,
     "licenses": [
       "by",
       "cc0"

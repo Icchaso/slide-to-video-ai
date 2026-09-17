@@ -186,7 +186,7 @@ def sidecar_path(audio_path):
 def write_sidecar(audio_path, track):
     data = {k: track.get(k) for k in ("id", "title", "creator", "license", "license_version",
                                        "license_url", "attribution", "source_url", "provider",
-                                       "duration_s", "url")}
+                                       "duration_s", "url", "tags", "lra")}
     sidecar_path(audio_path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return data
 
@@ -227,3 +227,31 @@ def credits_text(sidecar):
 def licenses_md_row(filename, mood, sidecar, date_str):
     return (f"| {filename} | {mood} | {sidecar.get('title')} / {sidecar.get('creator')} | "
             f"{sidecar.get('source_url') or ''} | {license_label(sidecar)} | {date_str} |")
+
+
+def reason_text(c, video_sec):
+    """おすすめの理由を、タグ・長さ・抑揚・ライセンスから短く組み立てる（人が聴く前の判断材料）"""
+    tags = set(c.get("tags") or [])
+    parts = []
+    if c.get("source") == "local":
+        parts.append("以前に採用した曲")
+    if "instrumental" in tags:
+        parts.append("歌なし")
+    if c.get("query"):
+        parts.append(f"検索語「{c['query']}」")
+    speed = {"speed_low": "ゆったり", "speed_medium": "ふつうのテンポ", "speed_high": "速めのテンポ"}
+    parts += [speed[t] for t in sorted(tags) if t in speed][:1]
+    genre = [t for t in sorted(tags) if t not in speed and t != "instrumental" and len(t) <= 16][:2]
+    if genre:
+        parts.append("タグ: " + "/".join(genre))
+    dur = float(c.get("duration_s") or 0)
+    if dur >= video_sec:
+        parts.append("動画より長くつなぎ目なし")
+    elif dur > 0:
+        parts.append(f"動画より短く{int(-(-video_sec // dur))}回つなぐ")
+    lra = c.get("lra")
+    if lra is not None:
+        parts.append("抑揚ひかえめ" if lra < 4 else ("抑揚ほどよい" if lra <= 10 else "抑揚大きめ"))
+    if (c.get("license") or "").lower() == "cc0":
+        parts.append("クレジット不要")
+    return "・".join(parts) or "—"
