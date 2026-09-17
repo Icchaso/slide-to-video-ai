@@ -4,6 +4,8 @@
       "Bash(./run.sh --check)",
       "Bash(./run.sh --project *)",
       "Bash(./run.sh --draft --project *)",
+      "Bash(./run.sh --voice-check --project *)",
+      "Bash(./run.sh --bgm-candidates --project *)",
       "Bash(cd hyperframes-app && npm run check)"
     ],
     "deny": [

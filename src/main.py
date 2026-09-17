@@ -310,6 +310,7 @@ def _extract_directive(content, name):
 
 
 SUBTITLE_POSITIONS = ("bottom", "top", "band", "off")
+FOCUS_EFFECTS = ("zoom", "spotlight", "box", "underline")
 
 
 def load_storyboard(project_inbox, slide_count):
@@ -336,14 +337,50 @@ def load_storyboard(project_inbox, slide_count):
             errors.append(f"{where} は {{}} にしてください")
             return
         for k, v in scene.items():
-            if k == "subtitle":
+            if k == "focus" and where == "default":
+                errors.append("default に focus は書けません（スライドごとに書いてください）")
+            elif k == "subtitle":
                 if v not in SUBTITLE_POSITIONS:
                     errors.append(f"{where}.subtitle = '{v}' は使えません（{' / '.join(SUBTITLE_POSITIONS)}）")
+            elif k == "focus":
+                check_focus(where, v)
             elif k == "gap":
                 if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 2):
                     errors.append(f"{where}.gap = {v!r} は 0〜2 の秒数にしてください")
             elif k != "note":
                 errors.append(f"{where} の不明なキー '{k}'")
+
+    def check_focus(where, focus):
+        if not isinstance(focus, list):
+            errors.append(f"{where}.focus は [{{...}}, ...] の配列にしてください")
+            return
+        for j, f in enumerate(focus, start=1):
+            w = f"{where}.focus[{j}]"
+            if not isinstance(f, dict):
+                errors.append(f"{w} は {{}} にしてください")
+                continue
+            for k in f:
+                if k not in ("sentence", "effect", "box", "span", "note"):
+                    errors.append(f"{w} の不明なキー '{k}'（使えるのは sentence / effect / box / span / note）")
+            sn = f.get("sentence")
+            if not isinstance(sn, int) or isinstance(sn, bool) or sn < 1:
+                errors.append(f"{w}.sentence は 1 以上の整数（そのスライドの何文目か）にしてください")
+            if f.get("effect") not in FOCUS_EFFECTS:
+                errors.append(f"{w}.effect = {f.get('effect')!r} は使えません（{' / '.join(FOCUS_EFFECTS)}）")
+            box = f.get("box")
+            nums = isinstance(box, list) and len(box) == 4 and all(
+                isinstance(x, (int, float)) and not isinstance(x, bool) for x in box)
+            if not nums or not (0 <= box[0] < 1 and 0 <= box[1] < 1 and 0 < box[2] <= 1 and 0 < box[3] <= 1
+                                and box[0] + box[2] <= 1.001 and box[1] + box[3] <= 1.001):
+                errors.append(f"{w}.box は [左, 上, 幅, 高さ]（スライドに対する 0〜1 の割合。はみ出さない）にしてください: {box!r}")
+            span = f.get("span", [0, 1])
+            if not (isinstance(span, list) and len(span) == 2 and all(
+                    isinstance(x, (int, float)) and not isinstance(x, bool) for x in span) and 0 <= span[0] < span[1] <= 1):
+                errors.append(f"{w}.span は [開始, 終了]（その文の長さに対する 0〜1 の割合。開始 < 終了）にしてください: {span!r}")
+        keys = [(f.get("sentence"), f.get("effect"), tuple(f.get("span", [0, 1])))
+                for f in focus if isinstance(f, dict)]
+        if len(keys) != len(set(keys)):
+            errors.append(f"{where}.focus に同じ文・同じ効果・同じ区間の指定が重複しています")
 
     check_scene("default", data.get("default", {}))
     slides = data.get("slides", {})
@@ -1010,6 +1047,53 @@ def time_chunks(chunks, ranges, plain_text, words, duration, lead_time, lead_sil
 KB_ROTATION = ["in", "left", "out", "right"]
 
 
+def build_focus(focus_list, slide_no, scene_start, scene_end, sentence_times, image_size, anim, band_h):
+    """storyboard の focus を、スライドと一緒に動く演出要素（HTML）と zoom の指示に変換する。
+    位置はスライド画像に対する割合 → 画面上の px（object-fit: contain の実表示領域）に直す。
+    zoom は囲んだ場所が「テロップ帯を除いた上側」の中央に来るよう、拡大率と移動量を Python で決める（決定性）"""
+    W, H = 1920, 1080
+    iw, ih = image_size
+    fit = min(W / iw, H / ih)
+    dw, dh = iw * fit, ih * fit
+    ox, oy = (W - dw) / 2, (H - dh) / 2
+    pad = float(anim.get("focus_padding", 14))
+    max_zoom = float(anim.get("focus_max_zoom", 1.8))
+    lead = float(anim.get("focus_lead", 0.15))
+    area_h = H - band_h
+    html, cues, labels = [], [], []
+    for j, f in enumerate(sorted(focus_list, key=lambda f: (f["sentence"], f.get("span", [0, 1])[0])), start=1):
+        n = f["sentence"]
+        if n > len(sentence_times):
+            raise ValueError(f"storyboard.json: スライド {slide_no} の focus は {n} 文目を指していますが、"
+                             f"このスライドの台本は {len(sentence_times)} 文です")
+        st = sentence_times[n - 1]
+        a, b = f.get("span", [0, 1])
+        seg = st["end"] - st["start"]
+        t0 = max(scene_start, scene_start + st["start"] + seg * a - lead)
+        t1 = min(scene_end, scene_start + st["start"] + seg * b)
+        bx, by, bw, bh = f["box"]
+        x = ox + bx * dw - pad
+        y = oy + by * dh - pad
+        w = bw * dw + pad * 2
+        h = bh * dh + pad * 2
+        eff = f["effect"]
+        labels.append({"effect": eff, "start": round(t0, 3), "end": round(t1, 3), "box": f["box"], "sentence": n})
+        if eff == "zoom":
+            sc = min(max_zoom, (W * 0.9) / w, (area_h * 0.9) / h)
+            sc = max(1.0, sc)
+            tx = W / 2 - sc * (x + w / 2)
+            ty = area_h / 2 - sc * (y + h / 2)
+            tx = min(0.0, max(W - W * sc, tx))     # 左右・上に隙間を作らない
+            # スライドの下の端が画面に入ると、帯の奥にぼかし背景との継ぎ目が見えるため H で止める
+            ty = min(0.0, max(H - H * sc, ty))
+            cues.append(f'<div class="zoom-cue" data-t0="{t0:.3f}" data-t1="{t1:.3f}" '
+                        f'data-s="{sc:.4f}" data-x="{tx:.1f}" data-y="{ty:.1f}"></div>')
+        else:
+            html.append(f'<div id="focus-{slide_no}-{j}" class="focus-el focus-{eff}" data-t0="{t0:.3f}" data-t1="{t1:.3f}" '
+                        f'style="left:{x:.0f}px;top:{y:.0f}px;width:{w:.0f}px;height:{h:.0f}px"></div>')
+    return "".join(html), "".join(cues), labels
+
+
 def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
     log("4. HyperFrames用のHTMLコンポジションを生成します...")
     html_path = APP_DIR / "index.html"
@@ -1074,23 +1158,33 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
 
         # スライドシーン（クロスフェード分だけ次のスライドの下に延長）。安定 id は Studio 編集・lint 用
         clip_dur = duration + (0 if is_last else overlap)
-        kb = KB_ROTATION[i % len(KB_ROTATION)] if kb_on else "none"
+        focus_list = ((storyboard or {}).get("slides", {}).get(item['slide'], {}) or {}).get("focus") or []
+        has_zoom = any(f["effect"] == "zoom" for f in focus_list)
+        # zoom とゆっくりズーム（Ken Burns）は同じ transform を奪い合うので、zoom のある場面では Ken Burns を止める
+        kb = KB_ROTATION[i % len(KB_ROTATION)] if (kb_on and not has_zoom) else "none"
         fade_in = overlap if (i > 0 or intro_dur > 0) else 0
         track = i % 2
         z = 11 + i
         position = scene_setting(storyboard, item['slide'], "subtitle", default_position)
-        scene_cls = ""
         sub_cls = {"top": " pos-top", "band": " pos-band"}.get(position, "")
+        focus_html, zoom_cues, focus_labels = "", "", []
+        if focus_list and slide_idx < len(slides):
+            with Image.open(slides[slide_idx]) as im:
+                img_size = im.size
+            focus_html, zoom_cues, focus_labels = build_focus(
+                focus_list, item['slide'], start, round(start + duration, 3), item.get("sentence_times") or [],
+                img_size, anim, int(design.get("subtitle_band_height", 216)) if position == "band" else 0)
+        scene_cls = " has-zoom" if has_zoom else ""
         timeline.append({"kind": "scene", "slide": item['slide'], "start": start,
-                         "end": round(start + duration, 3), "position": position})
+                         "end": round(start + duration, 3), "position": position, "focus": focus_labels})
         clips.append(f'''
         <!-- Slide {slide_idx + 1} -->
         <div id="scene-{seq}" class="clip slide-scene{scene_cls}" data-start="{start:.3f}" data-duration="{clip_dur:.3f}" data-track-index="{track}"
              data-kb="{kb}" data-kb-zoom="{kb_zoom}" data-fade-in="{fade_in:.2f}" style="z-index:{z}">
           <div class="scene-inner">
             <div class="bg-blur" data-layout-allow-overflow><img id="bg-{seq}" src="{blur_rel}" /></div>
-            <div class="kb-wrap"><img id="slide-{seq}" class="slide-img" src="{bg_rel}" /></div>
-          </div>
+            <div class="kb-wrap"><img id="slide-{seq}" class="slide-img" src="{bg_rel}" />{focus_html}</div>
+          </div>{zoom_cues}
         </div>
         <audio id="voice-{seq}" class="clip" data-start="{start:.3f}" data-duration="{duration:.3f}" data-track-index="{2 if i % 2 == 0 else 5}" src="{audio_rel}"></audio>''')
 
@@ -1875,13 +1969,19 @@ def draft_review(video_title, base_style):
     for e in comp["timeline"]:
         if e["kind"] == "subtitle":
             t = (e["start"] + e["end"]) / 2
-        elif e["kind"] == "scene" and e["slide"] not in subtitled:
+        elif e["kind"] == "scene":
+            for fx in e.get("focus", []):     # 演出ごとの真ん中も撮る（1枚のテロップ中に演出が切り替わる場面を見落とさない）
+                shots.append({"kind": "focus", "slide": e["slide"], "position": e["position"],
+                              "t": round((fx["start"] + fx["end"]) / 2, 2)})
+            if e["slide"] in subtitled:
+                continue
             t = (e["start"] + e["end"]) / 2          # テロップを出さない場面も1コマは見る
         elif e["kind"] in ("intro", "outro"):
             t = e["start"] + min(1.6, (e["end"] - e["start"]) * 0.6)
         else:
             continue
         shots.append({**e, "t": round(t, 2)})
+    shots.sort(key=lambda x: x["t"])
     seen = set()
     shots = [s for s in shots if not (s["t"] in seen or seen.add(s["t"]))]
 
@@ -1908,15 +2008,20 @@ def draft_review(video_title, base_style):
             im = im.convert("RGB")
             im.thumbnail((1280, 1280))
             im.save(review_dir / name, "JPEG", quality=88)
+        active = [f"{fx['effect']}(文{fx['sentence']})" for sc in comp["timeline"]
+                  if sc["kind"] == "scene" and sc["slide"] == shot.get("slide")
+                  for fx in sc.get("focus", []) if fx["start"] <= shot["t"] <= fx["end"]]
+        text = shot.get("text") or next((e["text"] for e in comp["timeline"] if e["kind"] == "subtitle"
+                                         and e["start"] <= shot["t"] < e["end"]), None)
         frames.append({"file": name, "t": shot["t"], "kind": shot["kind"], "slide": shot.get("slide"),
-                       "subtitle_position": shot.get("position"), "text": shot.get("text")})
+                       "subtitle_position": shot.get("position"), "text": text, "focus": active})
     shutil.rmtree(raw_dir)
 
     (review_dir / "frames.json").write_text(json.dumps(frames, ensure_ascii=False, indent=2), encoding="utf-8")
-    lines = ["| コマ | 秒 | 種類 | スライド | テロップ |", "|---|---|---|---|---|"]
+    lines = ["| コマ | 秒 | 種類 | スライド | テロップ | 演出 |", "|---|---|---|---|---|---|"]
     for f in frames:
         text = (f["text"] or "").replace("\n", " / ")
-        lines.append(f"| {f['file']} | {f['t']} | {f['kind']} | {f['slide'] or ''} | {text} |")
+        lines.append(f"| {f['file']} | {f['t']} | {f['kind']} | {f['slide'] or ''} | {text} | {', '.join(f['focus'])} |")
     (review_dir / "frames.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     log(f"--- 下書き完了: {review_dir}（{len(frames)} コマ・一覧は frames.md） ---")
     return review_dir

@@ -86,6 +86,20 @@
       .subtitle-wrapper.pos-top { bottom: auto; top: 58px; align-items: flex-start; }
       .subtitle-wrapper.pos-band { bottom: 0; height: __BAND_HEIGHT__px; align-items: center; }
 
+      /* ===== 演出（storyboard.json の focus） =====
+         スライドと同じ .kb-wrap の中に置くので、zoom 中もスライドと一緒に動いて位置がずれない。
+         見え方はタイムラインの fromTo が決める（初期状態も fromTo 側で明示） */
+      .slide-scene.has-zoom .kb-wrap { transform-origin: 0 0; }
+      .zoom-cue { display: none; }
+      .focus-el { position: absolute; pointer-events: none; will-change: transform, opacity; }
+      .focus-spotlight { border-radius: 16px; box-shadow: 0 0 0 4000px rgba(0, 0, 0, 0.58); }
+      .focus-box { border: 7px solid __HIGHLIGHT_COLOR__; border-radius: 16px; box-shadow: 0 0 24px rgba(0, 0, 0, 0.45); }
+      .focus-underline::after {
+        content: ""; position: absolute; left: 14px; right: 14px; bottom: 6px; height: 9px;
+        border-radius: 5px; background: __HIGHLIGHT_COLOR__;
+      }
+      .focus-underline { transform-origin: 0 50%; }
+
       /* ===== イントロ / アウトロカード ===== */
       .card-scene { position: absolute; inset: 0; }
       .card-bg {
@@ -190,6 +204,45 @@
           else if (kb === "right") { from = { scale: zoom, x: -KB_PAN, y: 0 }; to = { scale: zoom, x: KB_PAN, y: 0 }; }
           tl.fromTo(kbWrap, from, { ...to, duration: dur, ease: "sine.inOut" }, start);
         }
+      });
+
+      // ===== 演出（focus）: 時刻は Python が文の実タイムスタンプから計算して data-t0/t1 に書いている =====
+      const FOCUS_IN = 0.35, FOCUS_OUT = 0.3;
+      document.querySelectorAll(".focus-el").forEach((el) => {
+        const t0 = parseFloat(el.dataset.t0);
+        const t1 = parseFloat(el.dataset.t1);
+        const outAt = Math.max(t0 + FOCUS_IN, t1 - FOCUS_OUT);
+        if (el.classList.contains("focus-underline")) {
+          tl.fromTo(el, { opacity: 1, scaleX: 0 }, { scaleX: 1, duration: 0.45, ease: "power2.out", immediateRender: true }, t0);
+        } else if (el.classList.contains("focus-box")) {
+          tl.fromTo(el, { opacity: 0, scale: 1.06 }, { opacity: 1, scale: 1, duration: FOCUS_IN, ease: "power2.out", immediateRender: true }, t0);
+        } else {
+          tl.fromTo(el, { opacity: 0 }, { opacity: 1, duration: FOCUS_IN, ease: "power1.inOut", immediateRender: true }, t0);
+        }
+        tl.fromTo(el, { opacity: 1 }, { opacity: 0, duration: FOCUS_OUT, ease: "power1.in", immediateRender: false }, outAt);
+      });
+
+      // zoom: 同じ場面で続けて寄るときは、いったん戻らず次の位置へそのまま移る
+      document.querySelectorAll(".slide-scene.has-zoom").forEach((clip) => {
+        const kbWrap = clip.querySelector(".kb-wrap");
+        const sceneEnd = parseFloat(clip.dataset.start) + parseFloat(clip.dataset.duration);
+        const cues = [...clip.querySelectorAll(".zoom-cue")].map((c) => ({
+          t0: parseFloat(c.dataset.t0), t1: parseFloat(c.dataset.t1),
+          s: parseFloat(c.dataset.s), x: parseFloat(c.dataset.x), y: parseFloat(c.dataset.y),
+        })).sort((a, b) => a.t0 - b.t0);
+        const home = { scale: 1, x: 0, y: 0 };
+        tl.set(kbWrap, home, parseFloat(clip.dataset.start));
+        let prev = null;
+        cues.forEach((c, k) => {
+          const from = prev && c.t0 - prev.t1 < 0.4 ? { scale: prev.s, x: prev.x, y: prev.y } : home;
+          tl.fromTo(kbWrap, from, { scale: c.s, x: c.x, y: c.y, duration: 0.6, ease: "power2.inOut", immediateRender: false }, c.t0);
+          const next = cues[k + 1];
+          if (!next || next.t0 - c.t1 >= 0.4) {
+            const outStart = Math.min(c.t1, sceneEnd - 0.55);
+            tl.fromTo(kbWrap, { scale: c.s, x: c.x, y: c.y }, { ...home, duration: 0.55, ease: "power2.inOut", immediateRender: false }, Math.max(c.t0 + 0.6, outStart));
+          }
+          prev = c;
+        });
       });
 
       // ===== テロップ: 発話追従テロップは即時表示が放送標準のためtweenなし（クリップ境界で瞬時切替） =====

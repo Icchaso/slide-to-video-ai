@@ -28,7 +28,7 @@ inbox/<動画名>/slides.pdf + script.md                   ← 入力（git 管�
 | 変えたいもの | 場所 |
 |---|---|
 | 声の読み方（テロップは変えない） | `inbox/<動画名>/reading.json`（make-video スキル ②'） |
-| 場面ごとの演出（テロップ位置など） | `inbox/<動画名>/storyboard.json`（書式は make-video スキル ③） |
+| 場面ごとの演出（テロップ位置・文の間・囲み/下線/スポットライト/寄り） | `inbox/<動画名>/storyboard.json`（書式は make-video スキル ③） |
 | 全動画の既定値（色・字幕・音量・閾値） | `src/video-style.json`（単一の情報源） |
 | 動画ごとの上書き | `inbox/<動画名>/style.json`、台本先頭の `# Title:` `# Style:` `# BGM:` |
 | デザイン・アニメーション | `src/template.html` と `src/main.py` の `generate_hyperframes_config` |

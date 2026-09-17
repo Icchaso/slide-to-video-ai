@@ -24,7 +24,10 @@
     "transition_duration": 0.6,
     "ken_burns": false,
     "ken_burns_zoom": 1.06,
-    "subtitle_lead_time": 0.08
+    "subtitle_lead_time": 0.08,
+    "focus_padding": 14,
+    "focus_max_zoom": 1.8,
+    "focus_lead": 0.15
   },
   "intro": {
     "enabled": true,
