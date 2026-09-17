@@ -85,6 +85,8 @@
     "enabled": true,
     "count": 3,
     "pool_size": 8,
+    "sources": ["jp", "openverse"],
+    "jp_per_pattern": 2,
     "licenses": [
       "by",
       "cc0"

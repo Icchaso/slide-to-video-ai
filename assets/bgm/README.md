@@ -30,14 +30,17 @@ assets/bgm/
 
 ## 入手先の例（無料・商用可のもの）
 
-- DOVA-SYNDROME（https://dova-s.jp/）— 商用利用可・多くはクレジット不要（曲ごとの利用規約を確認）
-- 甘茶の音楽工房（https://amachamusic.chagasi.com/）— 商用利用可・クレジット不要
+- OpenTracks（旧 DOVA-SYNDROME、https://opentracks.com/）— 商用利用可・表記不要（作曲者ごとの条件が優先）。**規約で bot 収集を禁止**しているので手で落とす
+- 魔王魂（https://maou.audio/）— CC BY 4.0。**表記「音楽：魔王魂」が必要**（LICENSES.md に書き、概要欄に貼る）
+- 甘茶の音楽工房（https://amachamusic.chagasi.com/）— 商用利用可・クレジット不要（直リンク禁止。ダウンロードページから落とす）
+- MusMus（https://musmus.main.jp/）— 商用利用可・表記「BGM:MusMus」が必要（広告ブロック中は DL 不可）
 - YouTube オーディオ ライブラリ — YouTube 上での利用が主。他媒体は各曲の帰属表示条件を確認
 
-## 自動で候補を探す（Openverse）
+## 自動で候補を探す（BGMer → 取れなければ Openverse）
 
-`./run.sh --bgm-candidates --project <動画名>` で、Openverse（Creative Commons 素材の横断検索・無料）から **CC BY / CC0 の楽曲だけ**を探し、3候補のプレビューを作ります。選んだ曲（`--bgm-choose N`）はこのフォルダに保存され、隣に `<ファイル名>.json`（出典・ライセンス・クレジット文）が置かれます。この JSON があると本番生成時に `output/<動画名>/credits.txt` が自動で作られます。
+`./run.sh --bgm-candidates --project <動画名>` で、日本の定番フリー BGM サイト **BGMer**（規約で商用・再配布とも可、表記不要）から曲調のパターンごとによくダウンロードされている曲を最大8曲集め、おすすめ3曲＋ほかの候補のプレビューを作ります。BGMer が取れないときは Openverse（Creative Commons 素材の横断検索）の **CC BY / CC0 の楽曲だけ**を探します。選んだ曲（`--bgm-choose N`）はこのフォルダに保存され、隣に `<ファイル名>.json`（出典・ライセンス・クレジット文）が置かれます。この JSON があると本番生成時に `output/<動画名>/credits.txt` が自動で作られます。
 
+- BGMer の曲 → 表記不要（`credits.txt` に「音楽：BGMer https://bgmer.net」が出るので、貼ると作者の励みになる）
 - CC BY の曲 → 動画の概要欄に `credits.txt` の1行を貼る（必須）
 - CC0 の曲 → クレジット不要
 - 手持ちで追加した曲は JSON が無いので、`LICENSES.md` に自分で条件を書く

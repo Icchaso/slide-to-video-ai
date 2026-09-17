@@ -27,11 +27,13 @@ description: inbox/<動画名>/ のスライド（PDF）と台本（.md）から
 - PDF の各ページ画像 `work/<動画名>/slides/slide_NNN.png` を見て、台本の `# Slide N` と中身が合っているかを確認（ずれていたら人間に確認）。画像がまだ無ければ先に `./run.sh --draft --project <動画名>` を1回回す（storyboard なしでよい。画像と下書きコマが同時にできる）
 
 ### ② BGM（台本に `# BGM:` が無いとき）
-1. `./run.sh --bgm-candidates --project <動画名>`（数十秒〜数分。Openverse が遅い）
-   → フリー素材（CC BY / CC0）と手持ちから **最大8曲** を集め、曲調が重ならない **おすすめ3曲** と「ほかの候補」に分ける。全曲に冒頭20秒のナレーション＋BGM プレビューが付く（`output/<動画名>/bgm_candidates/candidates.md`）
-2. `candidates.md` の **おすすめ3曲を理由つき** で見せ、プレビューの mp3 を送る（SendUserFile）。ほかの候補も曲名だけ並べ、**どの番号でも選べる** と伝えて **番号を選んでもらう**（Claude は曲を聴けないので、理由はタグ・長さ・抑揚からの目安と添える）
-3. 「N番で」→ `./run.sh --bgm-choose N --project <動画名>`
-4. 気に入らなければ `--bgm-query "<英語1語>"` で出し直す
+1. `./run.sh --bgm-candidates --project <動画名>`（初回は曲一覧の取得で1〜2分。一覧は7日キャッシュ）
+   → 日本の定番フリー BGM サイト **BGMer**（約550曲・DL 数つき）から、曲調のパターン（軽快ポップ／おしゃれ・Chill／ほのぼの日常／前向き・感動／スタイリッシュ）ごとに **よくダウンロードされている曲** を集めて最大8曲。**おすすめ3曲のうち2曲は軽快ポップ**、残り1曲は台本の雰囲気に合うパターン。全曲に冒頭20秒のナレーション＋BGM プレビューが付く（`output/<動画名>/bgm_candidates/candidates.md`）
+   - BGMer が取れないときだけ Openverse（海外の CC 音源）に切り替わる
+2. `candidates.md` の **おすすめ3曲を理由つき**（パターン・DL 数・雰囲気タグ）で見せ、プレビューの mp3 を送る（SendUserFile）。ほかの候補も曲名とパターンを並べ、**どの番号でも選べる** と伝えて **番号を選んでもらう**（Claude は曲を聴けないので、理由はタグと DL 数からの目安と添える）
+3. 「N番で」→ `./run.sh --bgm-choose N --project <動画名>`（BGMer の曲は **長い版**（数分〜10分）を保存するので、つなぎ目なしで流れる）
+4. 気に入らなければ `--bgm-query "<日本語のタグ>"`（例: `"おしゃれ"` `"ピアノ"` `"EDM"`）で絞って出し直す
+5. BGMer 以外（OpenTracks＝旧 DOVA-SYNDROME・甘茶の音楽工房・MusMus・魔王魂）は **規約上自動では取らない**。`candidates.md` 末尾のリンクを案内し、人が落とした曲を `assets/bgm/<mood>/` に置いてもらう
 
 ### ②' 声（読み方辞書と読み上げチェック）
 1. 台本を読み、**声が読み間違えやすい語** を先回りして `inbox/<動画名>/reading.json` に書く（音声に渡す文字だけが変わり、テロップは台本のまま）
@@ -121,7 +123,8 @@ PDF の各ページ画像（`work/<動画名>/slides/slide_NNN.png`。① で作
 | 表示 | 意味 | 対処 |
 |---|---|---|
 | `BGM: BGM なし` (WARN) | 曲が割り当てられていない | ② をやる。曲なし納品も可 |
-| `--bgm-candidates` が終了コード 3 | 候補ゼロ／Openverse 不通 | `--bgm-query` を変える。数分待つ。`assets/bgm/<mood>/` の手持ちから選ぶ |
+| `--bgm-candidates` が終了コード 3 | 候補ゼロ（BGMer も Openverse も不通、または絞り込みで0曲） | `--bgm-query` を変える・外す。数分待つ。`assets/bgm/<mood>/` の手持ちから選ぶ |
+| `BGMer の一覧を取得できません` (WARNING) | BGMer が落ちている・ページの作りが変わった | 数分後に再実行（7日以内の一覧があればそれを使う）。続くなら `src/bgm_jp.py` の `parse_bgmer_page` を直す |
 | `BGM: … 持続音の可能性` (WARN) | 音楽でない合成音 | 曲を差し替える。**合成音を BGM にしない** |
 | `TTS: … edge-tts にフォールバック` (WARN) | Fish Audio が失敗（401 キー失効／402 残高） | `.env` の `FISH_AUDIO_API_KEY` 更新を人間に依頼。edge-tts のまま納品してよいか確認 |
 | `TTS: … 無音で代替` (FAIL) | ネット不通 | 接続を直して再実行 |
@@ -139,6 +142,7 @@ PDF の各ページ画像（`work/<動画名>/slides/slide_NNN.png`。① で作
 - 品質ゲートの `TTS: fish` PASS だけを見て Fish Audio のキーが有効と伝える（`生成 0文` なら API を呼んでいない。新規生成の有無か直接1回の呼び出しで確かめる）
 - 台本の文言・スライドを書き換える（読み方は reading.json、演出は storyboard.json で指定する）
 - BGM を人間に選ばせずに決める
+- BGM 候補を1つのムード・海外の無名曲だけで出す（「チョイス悪い」と言われた。曲調を広く、日本の定番フリー素材を優先。解説動画の既定は軽快ポップ寄り）
 - 品質ゲート FAIL・自己レビュー未実施のまま「完成」と報告する
 - `hyperframes-app/index.html` を手で編集する（毎回上書きされる）
-- Openverse 以外の素材サイトからスクリプトで自動取得する
+- BGMer・Openverse 以外の素材サイト（OpenTracks＝旧 DOVA・甘茶・MusMus・魔王魂）からスクリプトで自動取得する（規約で bot 収集・直リンクを禁止、または直接取得を拒否している。2026-09-17 確認）

@@ -41,6 +41,7 @@ from PIL import Image
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import bgm_search  # noqa: E402  Openverse 検索・sidecar・クレジット
+import bgm_jp  # noqa: E402  日本の定番フリーBGM（BGMer）
 
 load_dotenv()
 
@@ -1696,12 +1697,17 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
         seen.update(new)
         return True
 
-    # 手持ちライブラリ（以前選んだ曲）
-    for f in list_bgm_files(ASSETS_DIR / "bgm" / mood):
+    current = (parsed.get("bgm_hint") or "").strip()
+    sources = cfg.get("sources", ["jp", "openverse"])
+    # 手持ちライブラリ: 今この動画で使っている曲と、日本のフリー素材サイトから以前選んだ曲だけ混ぜる
+    local_files = [f for m in MOODS for f in list_bgm_files(ASSETS_DIR / "bgm" / m)]
+    for f in local_files:
+        sc = bgm_search.read_sidecar(f) or {}
+        if f.name != current and sc.get("provider") != "bgmer":
+            continue
         dur = ffprobe_duration(f)
         if dur < min_sec:
             continue
-        sc = bgm_search.read_sidecar(f) or {}
         if not remember(sc.get("id"), sc.get("source_url"), f.stem):
             continue
         pool.append({
@@ -1711,13 +1717,53 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
             "duration_s": round(dur, 1), "provider": sc.get("provider") or "local",
             "source_url": sc.get("source_url") or "", "attribution": sc.get("attribution") or "",
             "tags": sc.get("tags") or [], "lra": sc.get("lra"), "score": 2.0,
+            "pattern": sc.get("pattern") or "", "credit": sc.get("credit") or "",
         })
     if pool:
         log(f"   - 手持ちライブラリから: {len(pool)}曲")
 
-    # Openverse で広めに集める
+    # 日本の定番フリー素材（BGMer）から曲調のパターンごとに集める。規約の確認結果は src/bgm_jp.py の先頭
+    jp_used = False
+    if "jp" in sources and cfg.get("enabled", True):
+        catalog = bgm_jp.load_catalog(WORK_DIR / "_bgm_cache", log)
+        if query:
+            q = query.lower()
+            catalog = [t for t in catalog if q in " ".join([t["title"]] + t["genres"] + t["moods"]).lower()]
+            log(f"   - 絞り込み「{query}」: {len(catalog)}曲")
+        per_pattern = int(cfg.get("jp_per_pattern", 2))
+        picks = bgm_jp.pick_by_pattern(catalog, per_pattern=per_pattern, exclude_ids=seen)
+        # 並び: 軽快ポップを先頭（解説動画の既定）→ ムードに合うパターン → 残り。各パターンの1曲目を先に並べて曲調を散らす
+        lead = {"serious": ["前向き・感動", "おしゃれ・Chill"], "relaxing": ["ほのぼの日常", "おしゃれ・Chill"],
+                "upbeat": ["軽快ポップ", "おしゃれ・Chill"]}.get(mood, ["おしゃれ・Chill"])
+        order = ["軽快ポップ"] + [n for n in lead if n != "軽快ポップ"]
+        order += [n for n, _g, _m in bgm_jp.PATTERNS if n not in order]
+        ordered = [picks[n][i] for i in range(per_pattern) for n in order if i < len(picks.get(n, []))]
+        if len(picks.get("軽快ポップ", [])) > 1:  # おすすめ3曲のうち2曲は軽快ポップ（いっちゃん指定 2026-09-17）
+            ordered.remove(picks["軽快ポップ"][1])
+            ordered.insert(1, picks["軽快ポップ"][1])
+        for t in ordered:
+            if len(pool) >= pool_size:
+                break
+            p = bgm_search.download_track({"url": t["short_url"], "title": t["title"], "id": t["id"], "provider": t["source"]},
+                                          WORK_DIR / "_bgm_cache", _probe_track, log, min_lra, min_sec, slug=t["id"])
+            if not p or not remember(t["id"], t["page_url"]):
+                continue
+            dur = ffprobe_duration(p)
+            lra = _probe_track(p)[1]
+            pool.append({
+                "source": t["source"], "path": str(p), "cache_path": str(p), "slug": t["id"], "mood": mood,
+                "title": t["title"], "creator": t["creator"], "license": t["source"],
+                "license_label": bgm_jp.license_label(t), "duration_s": round(dur, 1), "lra": lra,
+                "provider": t["source"], "source_url": t["page_url"], "attribution": "", "id": t["id"],
+                "url": t["short_url"], "long_url": t.get("long_url"), "long_s": t.get("long_s", 0),
+                "tags": (t["genres"] + t["moods"])[:10], "pattern": t["pattern"], "downloads": t["downloads"],
+                "credit": bgm_jp.credit_for(t), "reason": bgm_jp.reason_text(t, est_sec, dur, lra), "jp_rank": len(pool),
+            })
+            jp_used = True
+
+    # Openverse（海外の CC 音源）は日本のフリー素材が取れなかったときの予備
     need = pool_size - len(pool)
-    if need > 0 and cfg.get("enabled", True):
+    if need > 0 and not jp_used and "openverse" in sources and cfg.get("enabled", True):
         # 検索語は最大 max_queries 個分をまとめて集めてからスコア上位を選ぶ（1語だけだと曲調が偏る）
         queries = [query] if query else list(cfg.get("queries", {}).get(mood) or bgm_search.MOOD_QUERIES[mood])
         queries = queries[:int(cfg.get("max_queries", 3))]
@@ -1756,22 +1802,28 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
         log("   [ERROR] 候補が見つかりません。--bgm-query で検索語を変えるか、assets/bgm/<mood>/ に曲を追加してください")
         return EXIT_QA_FAIL
 
-    # 並べ替え: 適性スコア＋動画より長い曲（つなぎ目なし）を優先。同点は曲名順で決定的
-    for c in pool:
-        c["rank_score"] = c["score"] + (1.0 if c["duration_s"] >= est_sec else 0.0)
-        c["reason"] = bgm_search.reason_text(c, est_sec)
-    pool.sort(key=lambda c: (-c["rank_score"], c["title"].lower(), c["slug"]))
-    # おすすめは検索語（曲調）が重ならないように上から選び、足りなければスコア順で埋める
-    rec, used_q = [], set()
-    for c in pool:
-        q = c.get("query") or c["source"]
-        if len(rec) < count and q not in used_q:
-            rec.append(c)
-            used_q.add(q)
+    if jp_used:
+        # 日本のフリー素材: 上で並べた順（軽快ポップ先頭・パターンを散らす）のまま、先頭 count 曲をおすすめにする
+        for c in pool:
+            c.setdefault("reason", "・".join(x for x in (c.get("pattern"), "以前に採用した曲") if x))
+        rec = [c for c in pool if c["source"] == "bgmer" and "jp_rank" in c][:count]
+        pool = [c for c in pool if "jp_rank" in c] + [c for c in pool if "jp_rank" not in c]  # 手持ちの曲は一覧の最後
+    else:
+        # 並べ替え: 適性スコア＋動画より長い曲（つなぎ目なし）を優先。同点は曲名順で決定的
+        for c in pool:
+            c["rank_score"] = c["score"] + (1.0 if c["duration_s"] >= est_sec else 0.0)
+            c["reason"] = bgm_search.reason_text(c, est_sec)
+        pool.sort(key=lambda c: (-c["rank_score"], c["title"].lower(), c["slug"]))
+        # おすすめは検索語（曲調）が重ならないように上から選び、足りなければスコア順で埋める
+        rec, used_q = [], set()
+        for c in pool:
+            q = c.get("query") or c["source"]
+            if len(rec) < count and q not in used_q:
+                rec.append(c)
+                used_q.add(q)
     rec += [c for c in pool if c not in rec][:count - len(rec)]
     for c in pool:
         c["recommended"] = c in rec
-    current = (parsed.get("bgm_hint") or "").strip()
     for c in pool:
         if current and Path(c["path"]).name == current:
             c["reason"] = "今この動画で使っている曲・" + c["reason"]
@@ -1816,13 +1868,15 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
 
     (out_dir / "candidates.json").write_text(json.dumps(candidates, ensure_ascii=False, indent=2), encoding="utf-8")
     row = lambda c: (f"| {c['number']} | {c['title']} | {c['creator']} | {c['license_label']} | {c['duration_s']:.0f}s | "
-                     f"{c['reason']} | {c['provider']} {c['source_url']} | {c['preview']} |")
-    head = ["| # | 曲名 | 作者 | ライセンス | 長さ | おすすめの理由 | 出典 | プレビュー |", "|---|---|---|---|---|---|---|---|"]
+                     f"{c['reason']} | {c['source_url']} | {c['preview']} |")
+    head = ["| # | 曲名 | 作者 | ライセンス | 長さ | おすすめの理由 | 曲ページ | プレビュー |", "|---|---|---|---|---|---|---|---|"]
     lines = [f"# BGM 候補（{video_title} / ムード: {mood} / 動画 約{est_sec:.0f}秒）", "", "## おすすめ", ""] + head
     lines += [row(c) for c in candidates if c["recommended"]]
     others = [c for c in candidates if not c["recommended"]]
     if others:
         lines += ["", "## ほかの候補（聴いて気に入ればこちらの番号でも選べる）", ""] + head + [row(c) for c in others]
+    lines += ["", "## ほかのサイトで探す（自動では取りません。聴いて気に入った曲を落とし、`assets/bgm/<relaxing|upbeat|serious>/` に置くと次回から候補に混ざる）", ""]
+    lines += [f"- [{n}]({u}) — {why}" for n, u, why in bgm_jp.MANUAL_SITES]
     lines += ["", f"選ぶ: `./run.sh --bgm-choose <番号> --project {video_title}`"]
     (out_dir / "candidates.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     log("=== BGM 候補 ===")
@@ -1856,7 +1910,18 @@ def bgm_choose(video_title, n):
         dest = ASSETS_DIR / "bgm" / mood / f"{c['slug']}.mp3"
         dest.parent.mkdir(parents=True, exist_ok=True)
         if not dest.exists():
-            shutil.copy2(c["path"], dest)
+            # BGMer は候補のプレビューに短い版を使う。長い版（つなぎ目なしで数分〜10分）があれば採用時にそちらを取る
+            long_ok = False
+            if c.get("long_url") and float(c.get("long_s") or 0) > float(c.get("duration_s") or 0) + 5:
+                p = bgm_search.download_track({"url": c["long_url"], "title": c["title"], "id": c["id"], "provider": c["provider"]},
+                                              WORK_DIR / "_bgm_cache", _probe_track, log, 0, 0, slug=c["slug"] + "_long")
+                if p:
+                    shutil.copy2(p, dest)
+                    c["duration_s"] = round(ffprobe_duration(dest), 1)
+                    long_ok = True
+                    log(f"   - 長い版を保存しました（{c['duration_s']:.0f}秒）")
+            if not long_ok:
+                shutil.copy2(c["path"], dest)
         bgm_search.write_sidecar(dest, c)
         lic_md = ASSETS_DIR / "bgm" / "LICENSES.md"
         existing = lic_md.read_text(encoding="utf-8") if lic_md.exists() else ""

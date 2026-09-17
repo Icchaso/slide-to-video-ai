@@ -143,18 +143,18 @@ def slug_for(track):
     return f"{base}_{prov}{track['id']}"
 
 
-def download_track(track, cache_dir, probe, log=print, min_lra=1.2, min_seconds=30):
+def download_track(track, cache_dir, probe, log=print, min_lra=1.2, min_seconds=30, slug=None):
     """曲を work/_bgm_cache/ にDLし、ffprobe/ebur128 で検証。不適なら None"""
     cache_dir = Path(cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
-    dest = cache_dir / f"{slug_for(track)}.mp3"
+    dest = cache_dir / f"{slug or slug_for(track)}.mp3"
     if not dest.exists():
         try:
             with requests.get(track["url"], stream=True, timeout=90,
                               headers={"User-Agent": USER_AGENT}) as r:
                 r.raise_for_status()
                 ctype = r.headers.get("content-type", "")
-                if "audio" not in ctype and "octet" not in ctype:
+                if "audio" not in ctype and "octet" not in ctype and "force-download" not in ctype:
                     raise RuntimeError(f"音声でない応答: {ctype}")
                 with open(dest, "wb") as f:
                     for chunk in r.iter_content(chunk_size=1 << 16):
@@ -186,7 +186,7 @@ def sidecar_path(audio_path):
 def write_sidecar(audio_path, track):
     data = {k: track.get(k) for k in ("id", "title", "creator", "license", "license_version",
                                        "license_url", "attribution", "source_url", "provider",
-                                       "duration_s", "url", "tags", "lra")}
+                                       "duration_s", "url", "tags", "lra", "credit", "pattern", "long_url")}
     sidecar_path(audio_path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return data
 
@@ -203,6 +203,8 @@ def read_sidecar(audio_path):
 
 def license_label(sidecar):
     lic = (sidecar.get("license") or "").lower()
+    if lic == "bgmer":
+        return "BGMer 規約（商用可・表記不要）"
     ver = sidecar.get("license_version") or ""
     if lic == "cc0":
         return "CC0（クレジット不要）"
@@ -215,6 +217,8 @@ def credits_text(sidecar):
     """動画の概要欄にそのまま貼れるクレジット文"""
     if not sidecar:
         return ""
+    if sidecar.get("credit"):  # 日本のフリー素材サイト（bgm_jp.credit_for が作った書式）
+        return sidecar["credit"]
     lic = (sidecar.get("license") or "").lower()
     if lic == "cc0":
         return (f"Music: \"{sidecar.get('title')}\" by {sidecar.get('creator')} (CC0 — クレジット表記不要) "

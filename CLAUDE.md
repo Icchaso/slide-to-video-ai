@@ -32,7 +32,7 @@ inbox/<動画名>/slides.pdf + script.md                   ← 入力（git 管�
 | 全動画の既定値（色・字幕・音量・閾値） | `src/video-style.json`（単一の情報源） |
 | 動画ごとの上書き | `inbox/<動画名>/style.json`、台本先頭の `# Title:` `# Style:` `# BGM:` |
 | デザイン・アニメーション | `src/template.html` と `src/main.py` の `generate_hyperframes_config` |
-| BGM 検索 | `src/bgm_search.py` |
+| BGM 検索 | `src/bgm_jp.py`（BGMer・既定）/ `src/bgm_search.py`（Openverse・予備） |
 
 ## コマンド
 ```bash
@@ -40,7 +40,7 @@ inbox/<動画名>/slides.pdf + script.md                   ← 入力（git 管�
 ./run.sh --draft --project <動画名>                # 下書き: テロップごとのコマを work/<動画名>/review/ に撮る（数十秒）
 ./run.sh --voice-check --project <動画名>          # 読み上げチェック: 文字起こしと台本を読みで照合 → work/<動画名>/voice_check.md
 ./run.sh --project <動画名>                        # 1本作る（数分。run_in_background で待つ）
-./run.sh --bgm-candidates --project <動画名> [--bgm-query "英語1語"]   # BGM を最大8曲集め、おすすめ3曲（理由つき）＋全曲プレビュー
+./run.sh --bgm-candidates --project <動画名> [--bgm-query "タグ"]   # BGMer から最大8曲、おすすめ3曲（うち2曲は軽快ポップ・理由つき）＋全曲プレビュー
 ./run.sh --bgm-choose N --project <動画名>         # 候補 N を採用
 ./run.sh --strict                                 # lint エラーでレンダ前に停止
 cd hyperframes-app && npm run check               # lint + runtime + layout + motion + contrast
@@ -51,6 +51,7 @@ cd hyperframes-app && npm run check               # lint + runtime + layout + mo
 - **リポジトリは公開**。`.env`・`work/`・`output/`・`inbox/` の中身・ルートの `.mp4`・`assets/bgm/` の音楽ファイルはコミットしない（`.gitignore` 済み。フリー素材の再配布はライセンス違反）。BGM の出典は `assets/bgm/LICENSES.md` だけコミットする
 - 合成音（`sine` / `anullsrc` 等）を `assets/bgm/` に置かない（動画全体が「ブーン」になる事故が過去にあった）
 - BGM は人間に番号で選ばせる。CC BY の曲は `credits.txt` を概要欄に貼るよう伝える
+- 自動で取ってよい BGM サイトは BGMer と Openverse だけ（OpenTracks＝旧 DOVA・甘茶・MusMus・魔王魂は規約で bot 収集・直リンク禁止か直接取得を拒否。2026-09-17 確認）
 - 品質ゲート FAIL・自己レビュー未実施のまま「完成」と報告しない
 - `npx hyperframes` はピン無しで実行しない（`hyperframes-app/package.json` のピンを使う）
 - 決定性を壊さない（`Date.now()` / `Math.random()` / レンダ中のネット取得を使わない。同じ入力なら `index.html` の md5 が一致）

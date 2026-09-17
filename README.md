@@ -82,9 +82,9 @@ inbox/
 
 ### 2.5 BGM を選ぶ（集めた候補から）
 
-AI に「BGM 候補を出して」と頼む（または `./run.sh --bgm-candidates --project 新商品紹介`）と、台本の雰囲気に合う曲を無料の CC 音源（Openverse 経由の Jamendo / Freesound、CC BY / CC0 のみ）と手持ちの曲から **最大8曲** 集め、曲調が重ならない **おすすめ3曲（理由つき）** と「ほかの候補」に分けて、全曲の**冒頭20秒のナレーション＋BGM のプレビュー**を `output/新商品紹介/bgm_candidates/` に書き出します。
+AI に「BGM 候補を出して」と頼む（または `./run.sh --bgm-candidates --project 新商品紹介`）と、日本の定番フリー BGM サイト **BGMer**（商用・収益化チャンネル可・クレジット不要）から、軽快ポップ／おしゃれ・Chill／ほのぼの日常／前向き・感動／スタイリッシュのパターンごとに **よくダウンロードされている曲** を最大8曲集め、**おすすめ3曲（うち2曲は軽快ポップ・理由つき）** と「ほかの候補」に分けて、全曲の**冒頭20秒のナレーション＋BGM のプレビュー**を `output/新商品紹介/bgm_candidates/` に書き出します。
 
-聴いて「2番で」と伝えると（`./run.sh --bgm-choose 2 --project 新商品紹介`）、曲が保存され、台本に `# BGM: …` が書かれ、**概要欄用のクレジット文 `credits.txt`** ができます。CC BY の曲は動画の概要欄にこの1行を貼ってください（CC0 なら不要）。気に入らなければ `--bgm-query "ukulele"` のように英語の検索語を変えて出し直せます。
+聴いて「2番で」と伝えると（`./run.sh --bgm-choose 2 --project 新商品紹介`）、曲が保存され、台本に `# BGM: …` が書かれ、**概要欄用のクレジット文 `credits.txt`** ができます。BGMer の曲は表記不要ですが、貼っておくと作者の励みになります（Openverse の CC BY の曲は貼るのが必須）。気に入らなければ `--bgm-query "おしゃれ"` のようにタグで絞って出し直せます。OpenTracks（旧 DOVA-SYNDROME）・甘茶の音楽工房・MusMus・魔王魂は規約上自動では取らないので、`candidates.md` 末尾のリンクから聴いて落とし、`assets/bgm/<mood>/` に置いてください。
 
 ### 3. 結果を確認する
 
@@ -167,7 +167,7 @@ WARN・FAIL の意味と対処は [`.claude/skills/make-video/SKILL.md`](.claude
 | 「仮想環境が見つかりません」 | 先に `setup.sh` / `setup.bat` を実行 |
 | 終了コード 2（環境不足） | 画面に出た `brew install ...` / `choco install ...` を実行して再実行 |
 | BGM が入っていない | 「BGM 候補を出して」→ 選ぶ（`./run.sh --bgm-candidates` → `--bgm-choose N`）。または `assets/bgm/<mood>/` に曲を追加 |
-| BGM 候補が出ない・「検索失敗」 | Openverse API が遅い/落ちていることがある（自動リトライ済み）。数分後に再実行。`--bgm-query "英語"` で検索語を変えるのも有効 |
+| BGM 候補が出ない・「取得できません」 | BGMer / Openverse が一時的に落ちていることがある。数分後に再実行（BGMer の曲一覧は7日キャッシュ）。`--bgm-query` を外すのも有効 |
 | BGM が「ブーン」と鳴る | 置いた素材が音楽ではなく合成音・環境音。品質ゲートの `BGM: 持続音の可能性` 警告が目印。曲を差し替える |
 | 音声が edge-tts になった（WARN） | `.env` の Fish Audio キーが失効または残高不足。新しいキーを発行して差し替え |
 | 音声が無音（FAIL） | ネット接続を確認（TTS はオンライン生成） |
