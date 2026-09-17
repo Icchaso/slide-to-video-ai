@@ -8,13 +8,14 @@
 |---|---|---|
 | 0 | CLAUDE.md（地図とルール）・`make-video` スキル・`video-reviewer` エージェント・`.claude/settings.json`・AGENTS.md を切り替え案内に・`docs/AntiGravityからClaudeCodeへ.md` | 完了 c339255 |
 | 1 | `storyboard.json`（場面ごとの subtitle: bottom/top/band/off）・`--draft`（全尺を書き出さず `hyperframes snapshot --at` でテロップごとのコマ → `work/<名前>/review/`）・「という」の途中で改行しない | 完了（下のコミット） |
-| 2 | 声: 読み方辞書 `reading.json`・音声の文字起こしと台本の照合・場面ごとの間 | 未着手 |
-| 3 | 演出: zoom / spotlight / marker（Claude がスライドを見て storyboard に書く）。**Ken Burns の横移動でスライド枠の端が画面外に出る件（自己レビュー指摘 #5）もここで直す** | 未着手 |
+| 2 | 声: 読み方辞書 `reading.json`（音声だけ置換・テロップ不変）・`--voice-check`（文ごとに文字起こし→台本と**ひらがなの読み**で照合、⚠️=一致率<0.9 か2文字以上のずれ）・storyboard の `gap`（場面ごとの文間） | 完了（下のコミット）。**自分の声は未**: Fish の新キー＋録音1〜2分待ち → `POST /model`（private）で登録 → `.env` の `FISH_AUDIO_VOICE_ID` |
+| 2.5 | レイアウト標準（いっちゃん指定）: スライドは画面いっぱい、テロップは下20%（216px）の中に重ねる `band` が既定・文字52px・Ken Burns 既定オフ（全面スライドの端が切れるため）。スライドの中身は上80%に置く約束（スライドを作る側） | 完了（下のコミット） |
+| 3 | 演出: zoom / spotlight / marker（Claude がスライドを見て storyboard に書く）。全面スライドでも端が切れず下20%に食い込まない動きにする（Ken Burns は既定オフにした） | 未着手 |
 | 4 | README・判断記録・メモリ更新・共有相手への切り替え案内文 | 未着手 |
 
 **Phase 1 の検証結果**: storyboard 無しで従来と見た目一致（スナップショット差 最大1/255）・index.html 決定性 md5 一致・storyboard 誤りは項目つきでエラー・test-project でスライド3を band にしてグラフの項目名が見えることをレビュー役と目視で確認・本番 PASS（-14.01 LUFS）・`npm run check` エラー0。
 **残課題**: `npm run check` の contrast 警告1件（イントロ→スライド切替の t=3.2s でタイトル 1.3:1。以前からあるかは未確認）。
-**注意**: セッション途中で作ったエージェントは次のセッションから読み込まれる。`.env` の Fish Audio キーは現在有効（本番で TTS: fish PASS）。
+**注意**: セッション途中で作ったエージェントは次のセッションから読み込まれる。**`.env` の Fish Audio キーは失効中（401 Invalid Token）**。品質ゲートの `TTS: fish` PASS はキャッシュ再利用で新規生成0文だったため。新しい文は edge-tts にフォールバックする。声の録音は `assets/voice/`（.gitignore 済み・個人の声なので絶対にコミットしない）。
 
 ---
 

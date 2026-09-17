@@ -38,3 +38,6 @@ hyperframes-app/index.html
 # Keep the folder structure + LICENSES.md, add the music locally per machine (see assets/bgm/README.md)
 assets/bgm/*/*
 !assets/bgm/*/.gitkeep
+
+# Voice recordings for cloning (personal biometric data; never commit)
+assets/voice/

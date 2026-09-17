@@ -33,17 +33,15 @@
         filter: blur(22px) brightness(0.5) saturate(1.15);
       }
 
-      /* 前面のシャープなスライド（セーフエリア内・カード調） */
+      /* 前面のスライド: 画面いっぱい（16:9 以外のときだけ、ぼかし背景が左右/上下に見える） */
       .kb-wrap {
         position: absolute; inset: 0;
         display: flex; align-items: center; justify-content: center;
         will-change: transform;
       }
       .slide-img {
-        width: 93%; height: 93%;
+        width: 100%; height: 100%;
         object-fit: contain;
-        border-radius: 12px;
-        box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
       }
 
       /* ===== テロップ（放送基準: 白文字+黒縁+座布団、即時表示） ===== */
@@ -79,11 +77,13 @@
       }
       .subtitle-box .kw { color: __HIGHLIGHT_COLOR__; }
 
-      /* テロップ位置（storyboard.json の subtitle で場面ごとに指定。既定 bottom はクラスなし）
-         top  : スライド下部に図やラベルがある場面で上に逃がす
-         band : スライドを上に縮めて下に専用の帯を作る（スライドのどこにも重ならない） */
+      /* テロップ位置（既定は video-style.json の design.subtitle_position。storyboard.json で場面ごとに上書き）
+         スライドはどの位置でも画面いっぱい。テロップはスライドの上に重ねる。
+         band   : 標準。テロップを画面の下 20%（__BAND_HEIGHT__px）の中で上下中央に収める。
+                  スライドの中身は上 80% に置く前提（スライドを作る側の約束）
+         bottom : 下端から 58px の位置に重ねる（従来の位置）
+         top    : 上端から 58px の位置に重ねる */
       .subtitle-wrapper.pos-top { bottom: auto; top: 58px; align-items: flex-start; }
-      .slide-scene.layout-band .kb-wrap { bottom: __BAND_HEIGHT__px; }
       .subtitle-wrapper.pos-band { bottom: 0; height: __BAND_HEIGHT__px; align-items: center; }
 
       /* ===== イントロ / アウトロカード ===== */

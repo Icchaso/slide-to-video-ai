@@ -335,6 +335,9 @@ def load_storyboard(project_inbox, slide_count):
             if k == "subtitle":
                 if v not in SUBTITLE_POSITIONS:
                     errors.append(f"{where}.subtitle = '{v}' は使えません（{' / '.join(SUBTITLE_POSITIONS)}）")
+            elif k == "gap":
+                if not isinstance(v, (int, float)) or isinstance(v, bool) or not (0 <= v <= 2):
+                    errors.append(f"{where}.gap = {v!r} は 0〜2 の秒数にしてください")
             elif k != "note":
                 errors.append(f"{where} の不明なキー '{k}'")
 
@@ -351,6 +354,31 @@ def load_storyboard(project_inbox, slide_count):
         raise ValueError("storyboard.json の誤り:\n  - " + "\n  - ".join(errors))
     log(f"   - storyboard.json を読み込みました（個別指定 {len(slides)} 枚）")
     return {"default": data.get("default", {}), "slides": {int(n): s for n, s in slides.items()}}
+
+
+def load_readings(project_inbox):
+    """inbox/<動画名>/reading.json（読み方辞書）: {"表記": "読み"}。音声に渡す文字だけを置き換え、テロップは変えない"""
+    path = project_inbox / "reading.json"
+    if not path.exists():
+        return {}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"reading.json が JSON として読めません: {e}")
+    if not isinstance(data, dict):
+        raise ValueError('reading.json は {"表記": "読み"} の形にしてください')
+    bad = [k for k, v in data.items() if not isinstance(k, str) or not k or not isinstance(v, str) or not v]
+    if bad:
+        raise ValueError(f"reading.json の誤り: 表記と読みは空でない文字列にしてください → {bad}")
+    log(f"   - reading.json を読み込みました（{len(data)}語）")
+    return data
+
+
+def apply_readings(text, readings):
+    """長い表記から順に置き換える（「AI活用」を「AI」より先に）"""
+    for k in sorted(readings, key=len, reverse=True):
+        text = text.replace(k, readings[k])
+    return text
 
 
 def scene_setting(storyboard, slide_no, key, fallback):
@@ -445,10 +473,12 @@ def parse_input(video_title):
         blocks = [b for b in blocks if b["slide"] <= len(slide_images)]
 
     storyboard = load_storyboard(project_inbox, len(slide_images))
+    readings = load_readings(project_inbox)
 
     log(f"   - {len(blocks)}個の台本ブロックを抽出しました。タイトル: {video_display_title}")
     return {
         "storyboard": storyboard,
+        "readings": readings,
         "slides": slide_images,
         "script_blocks": blocks,
         "title": video_display_title,
@@ -587,12 +617,13 @@ def concat_block(seg_paths, gap, lead, tail, out_path):
                          "-ar", "48000", "-ac", "2", "-c:a", "pcm_s16le", out_path])
 
 
-def generate_tts(script_blocks, video_title, style):
+def generate_tts(script_blocks, video_title, style, storyboard=None, readings=None):
     log("2. ナレーション音声を生成します...")
     audio_cfg = style["audio"]
     lead = float(audio_cfg.get("lead_silence", 0.25))
     tail = float(audio_cfg.get("tail_silence", 0.6))
-    gap = float(audio_cfg.get("sentence_gap", 0.18))
+    default_gap = float(audio_cfg.get("sentence_gap", 0.18))
+    readings = readings or {}
     granularity = audio_cfg.get("tts_granularity", "sentence")
     min_chars = int(audio_cfg.get("min_sentence_chars", 6))
 
@@ -621,19 +652,22 @@ def generate_tts(script_blocks, video_title, style):
     for i, block in enumerate(script_blocks):
         text = tts_text_of(block['text'])
         slide_num = block['slide']
+        gap = float(scene_setting(storyboard, slide_num, "gap", default_gap))
         sentences = split_sentences(text, min_chars) if granularity == "sentence" else [text.replace('\n', '')]
 
         seg_paths = []
         seg_durs = []
         generated_any = False
         for s in sentences:
-            h = sha1_short(f"{cache_sig}|{s}")
+            # 読み方辞書は音声に渡す文字だけに当てる（辞書が無ければ従来と同じハッシュ → キャッシュもそのまま使える）
+            spoken = apply_readings(s, readings)
+            h = sha1_short(f"{cache_sig}|{spoken}")
             seg = audio_dir / f"seg_{h}.wav"
             if not seg.exists():
                 if not generated_any:
                     log(f"   - スライド {slide_num} の音声を生成中... ({len(sentences)}文 / {len(text)}文字)")
                     generated_any = True
-                raw, used = synth_sentence(s, audio_dir / f"seg_{h}_raw", tts)
+                raw, used = synth_sentence(spoken, audio_dir / f"seg_{h}_raw", tts)
                 engines_used.append(used)
                 normalize_segment(raw, seg)
                 raw.unlink(missing_ok=True)
@@ -659,6 +693,8 @@ def generate_tts(script_blocks, video_title, style):
 
         results.append({
             "slide": slide_num,
+            "segments": [{"text": s, "spoken": apply_readings(s, readings), "path": str(p)}
+                         for s, p in zip(sentences, seg_paths)],
             "audio_path": str(padded),
             "duration": ffprobe_duration(padded),
             "sentence_times": sentence_times,
@@ -1031,8 +1067,7 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
         track = i % 2
         z = 11 + i
         position = scene_setting(storyboard, item['slide'], "subtitle", default_position)
-        # 既定（bottom）ではクラスを足さない → storyboard が無いときの出力は従来と同じ
-        scene_cls = " layout-band" if position == "band" else ""
+        scene_cls = ""
         sub_cls = {"top": " pos-top", "band": " pos-band"}.get(position, "")
         timeline.append({"kind": "scene", "slide": item['slide'], "start": start,
                          "end": round(start + duration, 3), "position": position})
@@ -1581,7 +1616,8 @@ def bgm_candidates(video_title, base_style, query=None, count=3):
 
     # プレビュー用ナレーション: 先頭ブロックから preview_seconds ぶん（足りなければ次のブロックも結合。TTS はキャッシュ再利用）
     target = float(cfg.get("preview_seconds", 20))
-    audio_data, _ = generate_tts(parsed["script_blocks"][:4], video_title, style)
+    audio_data, _ = generate_tts(parsed["script_blocks"][:4], video_title, style,
+                                 parsed.get("storyboard"), parsed.get("readings"))
     parts, total = [], 0.0
     for a in audio_data:
         parts.append(a)
@@ -1696,6 +1732,117 @@ def bgm_choose(video_title, n):
 # main
 # =====================================================================
 
+_KANA_DIGITS = "れい いち に さん よん ご ろく なな はち きゅう".split()
+
+
+def _num_to_kana(num_str):
+    """整数・小数をおおまかな読みに（照合用。音便は代表的なものだけ）"""
+    if "." in num_str:
+        a, b = num_str.split(".", 1)
+        return _num_to_kana(a or "0") + "てん" + "".join(_KANA_DIGITS[int(c)] for c in b)
+    n = int(num_str)
+    if n == 0:
+        return "ぜろ"
+    special = {3: {100: "さんびゃく", 1000: "さんぜん"}, 6: {100: "ろっぴゃく"}, 8: {100: "はっぴゃく", 1000: "はっせん"}}
+    out = ""
+    for unit, name in ((10 ** 8, "おく"), (10 ** 4, "まん")):
+        if n >= unit:
+            out += _num_to_kana(str(n // unit)) + name
+            n %= unit
+    for unit, name in ((1000, "せん"), (100, "ひゃく"), (10, "じゅう")):
+        d = n // unit
+        if d:
+            out += special.get(d, {}).get(unit) or (("" if d == 1 else _KANA_DIGITS[d]) + name)
+        n %= unit
+    if n:
+        out += _KANA_DIGITS[n]
+    return out
+
+
+def to_kana(text, kks):
+    """照合用に「読み」へそろえる: 記号除去 → 数字と % を読みに → 漢字かな交じりをひらがなに"""
+    import unicodedata
+    t = unicodedata.normalize("NFKC", text)
+    t = t.replace("%", "パーセント")
+    t = re.sub(r"\d+(?:\.\d+)?", lambda m: _num_to_kana(m.group(0).replace(",", "")), t.replace(",", ""))
+    t = re.sub(r"[\s、。，．,.!?！？「」『』（）()・:：;；\-ー―~〜…\"']", lambda m: "ー" if m.group(0) == "ー" else "", t)
+    hira = "".join(x["hira"] for x in kks.convert(t))
+    return hira.lower()
+
+
+def voice_check(video_title, base_style):
+    """読み間違いの検出: 文ごとの音声を文字起こしし、台本と「ひらがなの読み」で照合する。
+    漢字どうしで比べると同音異字（制作/政策）で誤検出するため、両方を読みに直してから比べる。
+    出力: work/<動画名>/voice_check.md / .json（一致率の低い順）"""
+    import difflib
+    try:
+        import pykakasi
+    except ImportError:
+        raise RuntimeError("pykakasi がありません。./setup.sh を実行するか venv/bin/pip install -r requirements.txt を実行してください")
+    kks = pykakasi.kakasi()
+
+    project_work = WORK_DIR / video_title
+    project_work.mkdir(parents=True, exist_ok=True)
+    set_log_file(project_work / "run.log")
+    log(f"--- 読み上げチェック: {video_title} ---")
+    parsed = parse_input(video_title)
+    style = resolve_style(base_style, parsed.get("preset"), parsed.get("project_style"))
+    audio_data, tts_info = generate_tts(parsed['script_blocks'], video_title, style,
+                                        parsed.get("storyboard"), parsed.get("readings"))
+    tcfg = style.get("transcribe", {})
+    threshold = float(style.get("qa", {}).get("voice_match_min", 0.9))
+    cli = get_pinned_cli()
+    rows = []
+    for block in audio_data:
+        for seg in block["segments"]:
+            wav = Path(seg["path"])
+            cache = wav.with_suffix(".asr.json")
+            if cache.exists():
+                heard = json.loads(cache.read_text(encoding="utf-8"))["text"]
+            else:
+                tmp_dir = project_work / "asr_tmp"
+                tmp_dir.mkdir(exist_ok=True)
+                tmp_wav = tmp_dir / wav.name     # transcribe は入力の隣に transcript.json を書くので、専用フォルダで回す
+                shutil.copy2(wav, tmp_wav)
+                result = subprocess.run(cli + ["transcribe", str(tmp_wav), "--model", tcfg.get("model", "small"),
+                                               "--language", tcfg.get("language", "ja"), "--json"],
+                                        cwd=str(APP_DIR), capture_output=True, text=True, timeout=900)
+                envelope = json.loads(result.stdout.strip() or "{}") if result.returncode == 0 else {}
+                if not envelope.get("ok"):
+                    raise RuntimeError(f"文字起こしに失敗しました: {result.stderr[-300:] or result.stdout[-300:]}")
+                words = json.loads(Path(envelope["transcriptPath"]).read_text(encoding="utf-8"))
+                heard = "".join(w.get("text", "") for w in words)
+                cache.write_text(json.dumps({"text": heard}, ensure_ascii=False), encoding="utf-8")
+                shutil.rmtree(tmp_dir)
+            expected_kana = to_kana(seg["spoken"], kks)
+            heard_kana = to_kana(heard, kks)
+            sm = difflib.SequenceMatcher(None, expected_kana, heard_kana, autojunk=False)
+            diffs = [f"「{expected_kana[i1:i2]}」→「{heard_kana[j1:j2]}」"
+                     for op, i1, i2, j1, j2 in sm.get_opcodes() if op != "equal"]
+            # 長い文の中の1語の読み違いは一致率に表れにくいので、2文字以上のずれがあれば一致率に関係なく要確認にする
+            big = any(max(i2 - i1, j2 - j1) >= 2 for op, i1, i2, j1, j2 in sm.get_opcodes() if op != "equal")
+            match = round(sm.ratio(), 3)
+            rows.append({"slide": block["slide"], "script": seg["text"], "spoken": seg["spoken"], "heard": heard,
+                         "match": match, "flag": match < threshold or big, "diffs": diffs})
+
+    rows.sort(key=lambda r: r["match"])
+    flagged = [r for r in rows if r["flag"]]
+    (project_work / "voice_check.json").write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    lines = [f"# 読み上げチェック: {video_title}", "",
+             f"TTS: {tts_info['engine_expected']} ({tts_info['model']}) / {len(rows)}文 / 要確認 ⚠️: {len(flagged)}文（一致率 {threshold} 未満、または2文字以上のずれ）",
+             "", "一致率は「台本の読み」と「聞き取った読み」の近さ。文字起こし側の誤り（語尾・助詞の脱落など）も混ざるので、"
+             "ずれの箇所を見て **声が本当に読み間違えたものだけ** を reading.json に足す。", "",
+             "| 一致率 | スライド | 台本 | 聞き取り | ずれ（台本の読み→聞き取り） |", "|---|---|---|---|---|"]
+    for r in rows:
+        mark = "⚠️ " if r["flag"] else ""
+        lines.append(f"| {mark}{r['match']} | {r['slide']} | {r['script']} | {r['heard']} | {' / '.join(r['diffs'][:6])} |")
+    (project_work / "voice_check.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    if tts_info.get("fallbacks"):
+        log(f"   [WARNING] Fish Audio に失敗し {tts_info['fallbacks']}文が edge-tts の声になっています（キー失効・残高不足の可能性）")
+    log(f"--- 読み上げチェック完了: {len(rows)}文中 {len(flagged)}文が要確認 → {project_work / 'voice_check.md'} ---")
+    return flagged
+
+
 def draft_review(video_title, base_style):
     """下書き: 全尺を書き出さずに、テロップ1枚ごとの表示中央などのコマだけを撮る（自己レビュー用・数十秒）。
     出力: work/<動画名>/review/NNN_*.jpg と frames.json / frames.md（どのコマが何の場面か）"""
@@ -1706,7 +1853,8 @@ def draft_review(video_title, base_style):
 
     parsed = parse_input(video_title)
     style = resolve_style(base_style, parsed.get("preset"), parsed.get("project_style"))
-    audio_data, _ = generate_tts(parsed['script_blocks'], video_title, style)
+    audio_data, _ = generate_tts(parsed['script_blocks'], video_title, style,
+                                 parsed.get("storyboard"), parsed.get("readings"))
     comp = generate_hyperframes_config(parsed, audio_data, style, video_title)
 
     shots = []
@@ -1768,7 +1916,8 @@ def process_project(video_title, base_style, strict=False):
 
     parsed = parse_input(video_title)
     style = resolve_style(base_style, parsed.get("preset"), parsed.get("project_style"))
-    audio_data, tts_info = generate_tts(parsed['script_blocks'], video_title, style)
+    audio_data, tts_info = generate_tts(parsed['script_blocks'], video_title, style,
+                                        parsed.get("storyboard"), parsed.get("readings"))
     comp = generate_hyperframes_config(parsed, audio_data, style, video_title)
     render_video, lint_errors = render_hyperframes(video_title, strict=strict)
     final_video, audio_info = apply_ffmpeg_processing(
@@ -1837,6 +1986,8 @@ def main(argv=None):
     parser.add_argument("--bgm-choose", type=int, metavar="N", help="BGM 候補 N を採用して台本に # BGM: を書く")
     parser.add_argument("--bgm-query", help="--bgm-candidates の検索語を指定（英語。例: 'upbeat ukulele'）")
     parser.add_argument("--count", type=int, default=3, help="--bgm-candidates の候補数（既定 3）")
+    parser.add_argument("--voice-check", action="store_true",
+                        help="音声を文字起こしして台本と読みを照合し work/<動画名>/voice_check.md に書く（読み間違いの検出）")
     parser.add_argument("--draft", action="store_true",
                         help="全尺を書き出さず、テロップごとのコマだけ work/<動画名>/review/ に撮る（自己レビュー用）")
     args = parser.parse_args(argv)
@@ -1864,14 +2015,17 @@ def main(argv=None):
         log("inbox に処理対象のプロジェクトがありません（inbox/<動画名>/ に PDF と script.md を置いてください）。")
         return EXIT_OK
 
-    if args.draft:
+    if args.draft or args.voice_check:
         failed = False
         for project_dir in sorted(projects):
             try:
-                draft_review(project_dir.name, base_style)
+                if args.voice_check:
+                    voice_check(project_dir.name, base_style)
+                else:
+                    draft_review(project_dir.name, base_style)
             except Exception as e:
                 import traceback
-                log(f"[ERROR] {project_dir.name} の下書きでエラー: {e}")
+                log(f"[ERROR] {project_dir.name} の{'読み上げチェック' if args.voice_check else '下書き'}でエラー: {e}")
                 traceback.print_exc()
                 failed = True
             finally:
