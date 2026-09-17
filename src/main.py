@@ -1226,7 +1226,7 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
         title = parsed_data.get("title", video_title)
         clips.append(f'''
         <!-- Intro -->
-        <div id="intro-card" class="clip card-scene" data-start="0" data-duration="{intro_dur + overlap:.3f}" data-track-index="4" style="z-index:10">
+        <div id="intro-card" class="clip card-scene" data-start="0" data-duration="{intro_dur + overlap:.3f}" data-track-index="4" data-fade-out="{overlap:.2f}" style="z-index:10">
           <div class="scene-inner">
             <div class="card-bg"></div>
             <div class="card-glow"></div>

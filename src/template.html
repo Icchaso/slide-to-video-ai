@@ -264,6 +264,13 @@
         tl.fromTo("#intro-card .card-glow",
           { scale: 0.9, opacity: 0.6 },
           { scale: 1.12, opacity: 1, duration: d, ease: "sine.inOut" }, s);
+        // 次のスライドが重なり始める前に文字だけ先に消す（2つのタイトルが半透明で二重に見えるのを防ぐ）
+        const fadeOut = parseFloat(intro.dataset.fadeOut || "0");
+        if (fadeOut > 0) {
+          tl.fromTo("#intro-card .card-content",
+            { opacity: 1 },
+            { opacity: 0, duration: 0.3, ease: "power1.in" }, s + d - fadeOut - 0.3);
+        }
       }
 
       // ===== アウトロカード =====
