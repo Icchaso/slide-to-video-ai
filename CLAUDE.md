@@ -14,7 +14,8 @@
 
 ## 地図
 ```
-inbox/<動画名>/slides.pdf + script.md（+ style.json）   ← 入力（git 管理外）
+inbox/<動画名>/slides.pdf + script.md                   ← 入力（git 管理外。作らない・書き換えない）
+        + storyboard.json（Claude が書く絵コンテ）+ style.json
   → src/main.py            preflight → パース → 文単位TTS → テロップ同期
   → src/template.html      コンポジション（見た目の本体。ここを編集する）
   → hyperframes-app/index.html   自動生成（手で編集しない）
@@ -26,6 +27,7 @@ inbox/<動画名>/slides.pdf + script.md（+ style.json）   ← 入力（git �
 
 | 変えたいもの | 場所 |
 |---|---|
+| 場面ごとの演出（テロップ位置など） | `inbox/<動画名>/storyboard.json`（書式は make-video スキル ③） |
 | 全動画の既定値（色・字幕・音量・閾値） | `src/video-style.json`（単一の情報源） |
 | 動画ごとの上書き | `inbox/<動画名>/style.json`、台本先頭の `# Title:` `# Style:` `# BGM:` |
 | デザイン・アニメーション | `src/template.html` と `src/main.py` の `generate_hyperframes_config` |
@@ -34,6 +36,7 @@ inbox/<動画名>/slides.pdf + script.md（+ style.json）   ← 入力（git �
 ## コマンド
 ```bash
 ./run.sh --check                                  # 環境チェック（終了コード 2 = 不足）
+./run.sh --draft --project <動画名>                # 下書き: テロップごとのコマを work/<動画名>/review/ に撮る（数十秒）
 ./run.sh --project <動画名>                        # 1本作る（数分。run_in_background で待つ）
 ./run.sh --bgm-candidates --project <動画名> [--bgm-query "英語1語"]   # BGM 候補3曲＋プレビュー
 ./run.sh --bgm-choose N --project <動画名>         # 候補 N を採用

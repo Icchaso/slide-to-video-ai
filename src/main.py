@@ -13,7 +13,9 @@ inbox/<project>/(slides.pdf + script.md)
   → 7. 品質ゲート（閾値で機械判定 → build_summary.json に PASS/WARN/FAIL）
   → output/<project>/final.mp4 + contact_sheet.jpg + build_summary.json
 
-AntiGravity 等の AI エージェントが無人実行する前提:
+Claude Code（make-video スキル）が判断役として回す前提:
+  - storyboard.json（Claude がスライドを見て書く演出指示）を読み、無ければ従来どおりの出力
+  - --draft で全尺を書き出さずにテロップごとのコマを撮り、Claude が見て直してから本番を書き出す
   - 環境不足は preflight が「導入コマンド」付きで即座に報告する（終了コード 2）
   - 品質ゲートは毎回同じ基準で判定し、FAIL は終了コード 3 で失敗扱いにする
   - 同じ入力からは同じ出力（決定性）: ハッシュキャッシュ・決定的選曲・乱数不使用
@@ -303,6 +305,62 @@ def _extract_directive(content, name):
     return m.group(1).strip(), content.replace(m.group(0), '')
 
 
+SUBTITLE_POSITIONS = ("bottom", "top", "band", "off")
+
+
+def load_storyboard(project_inbox, slide_count):
+    """inbox/<動画名>/storyboard.json（Claude がスライドを見て書く演出指示）を読んで検証する。
+    無ければ空（今までと同じ出力）。書式の誤りは黙って無視せず、全部まとめて例外にする。
+      {"default": {"subtitle": "bottom"}, "slides": {"3": {"subtitle": "band"}}}
+    """
+    path = project_inbox / "storyboard.json"
+    if not path.exists():
+        return {"default": {}, "slides": {}}
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as e:
+        raise ValueError(f"storyboard.json が JSON として読めません: {e}")
+    errors = []
+    if not isinstance(data, dict):
+        raise ValueError("storyboard.json の一番外側は {} にしてください")
+    for key in data:
+        if key not in ("version", "default", "slides"):
+            errors.append(f"不明なキー '{key}'（使えるのは version / default / slides）")
+
+    def check_scene(where, scene):
+        if not isinstance(scene, dict):
+            errors.append(f"{where} は {{}} にしてください")
+            return
+        for k, v in scene.items():
+            if k == "subtitle":
+                if v not in SUBTITLE_POSITIONS:
+                    errors.append(f"{where}.subtitle = '{v}' は使えません（{' / '.join(SUBTITLE_POSITIONS)}）")
+            elif k != "note":
+                errors.append(f"{where} の不明なキー '{k}'")
+
+    check_scene("default", data.get("default", {}))
+    slides = data.get("slides", {})
+    if not isinstance(slides, dict):
+        errors.append("slides は {\"スライド番号\": {...}} の形にしてください")
+        slides = {}
+    for n, scene in slides.items():
+        if not str(n).isdigit() or not (1 <= int(n) <= slide_count):
+            errors.append(f"slides の '{n}' はスライド番号（1〜{slide_count}）ではありません")
+        check_scene(f"slides.{n}", scene)
+    if errors:
+        raise ValueError("storyboard.json の誤り:\n  - " + "\n  - ".join(errors))
+    log(f"   - storyboard.json を読み込みました（個別指定 {len(slides)} 枚）")
+    return {"default": data.get("default", {}), "slides": {int(n): s for n, s in slides.items()}}
+
+
+def scene_setting(storyboard, slide_no, key, fallback):
+    """スライド個別 → default → 既定値 の順で1項目を引く"""
+    scene = (storyboard or {}).get("slides", {}).get(slide_no, {})
+    if key in scene:
+        return scene[key]
+    return (storyboard or {}).get("default", {}).get(key, fallback)
+
+
 def parse_input(video_title):
     log(f"1. [{video_title}] スライドと台本のパースを開始します...")
     project_inbox = INBOX_DIR / video_title
@@ -386,8 +444,11 @@ def parse_input(video_title):
         warnings.append(msg)
         blocks = [b for b in blocks if b["slide"] <= len(slide_images)]
 
+    storyboard = load_storyboard(project_inbox, len(slide_images))
+
     log(f"   - {len(blocks)}個の台本ブロックを抽出しました。タイトル: {video_display_title}")
     return {
+        "storyboard": storyboard,
         "slides": slide_images,
         "script_blocks": blocks,
         "title": video_display_title,
@@ -698,7 +759,13 @@ def break_candidates(text):
             depth = max(0, depth - 1)
 
     def ok(p):
-        if not (0 < p < n) or text[p] in NO_BREAK_NEXT or text[p - 1] in NO_BREAK_PREV or inside[p]:
+        if not (0 < p < n) or text[p - 1] in NO_BREAK_PREV or inside[p]:
+            return False
+        # 「という」「といった」はひとかたまり: 「増加と|いう」は切らず、「増加|という」は許す
+        quotative = text.startswith(('という', 'といっ'), p)
+        if text[p] in NO_BREAK_NEXT and not quotative:
+            return False
+        if text[p - 1] == 'と' and text.startswith(('いう', 'いっ'), p):
             return False
         # 敬語接頭辞「ご紹介」「お好み」の途中で切らない
         if text[p - 1] in 'ごお' and _char_class(text[p]) == 'kanji':
@@ -707,6 +774,7 @@ def break_candidates(text):
 
     t1 = [m.end() for m in re.finditer('、', text)] + [p for p in range(1, n) if text[p - 1] in '」）)']
     t2 = [p for p in range(1, n) if _is_hira(text[p - 1]) and not _is_hira(text[p])]
+    t2 += [p for p in range(1, n) if text.startswith(('という', 'といっ'), p)]   # 「増加|という」
     t3 = [i + 1 for i, ch in enumerate(text[:-1]) if ch in PARTICLE_CHARS]
     t4 = [p for p in range(1, n) if _char_class(text[p - 1]) != _char_class(text[p])]
     return [[p for p in sorted(set(tier)) if ok(p)] for tier in (t1, t2, t3, t4)]
@@ -917,10 +985,13 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
     tail_silence = float(audio_cfg.get("tail_silence", 0.6))
 
     slides = parsed_data['slides']
+    storyboard = parsed_data.get("storyboard")
+    default_position = design.get("subtitle_position", "bottom")
     clips = []
     sfx_events = []
     subtitle_modes = []
     subtitle_count = 0
+    timeline = []   # 自己レビュー用: 場面とテロップの時刻表
 
     intro_dur = float(intro_cfg.get("duration", 3.0)) if intro_cfg.get("enabled", True) else 0.0
     content_t0 = intro_dur
@@ -959,9 +1030,15 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
         fade_in = overlap if (i > 0 or intro_dur > 0) else 0
         track = i % 2
         z = 11 + i
+        position = scene_setting(storyboard, item['slide'], "subtitle", default_position)
+        # 既定（bottom）ではクラスを足さない → storyboard が無いときの出力は従来と同じ
+        scene_cls = " layout-band" if position == "band" else ""
+        sub_cls = {"top": " pos-top", "band": " pos-band"}.get(position, "")
+        timeline.append({"kind": "scene", "slide": item['slide'], "start": start,
+                         "end": round(start + duration, 3), "position": position})
         clips.append(f'''
         <!-- Slide {slide_idx + 1} -->
-        <div id="scene-{seq}" class="clip slide-scene" data-start="{start:.3f}" data-duration="{clip_dur:.3f}" data-track-index="{track}"
+        <div id="scene-{seq}" class="clip slide-scene{scene_cls}" data-start="{start:.3f}" data-duration="{clip_dur:.3f}" data-track-index="{track}"
              data-kb="{kb}" data-kb-zoom="{kb_zoom}" data-fade-in="{fade_in:.2f}" style="z-index:{z}">
           <div class="scene-inner">
             <div class="bg-blur" data-layout-allow-overflow><img id="bg-{seq}" src="{blur_rel}" /></div>
@@ -970,7 +1047,7 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
         </div>
         <audio id="voice-{seq}" class="clip" data-start="{start:.3f}" data-duration="{duration:.3f}" data-track-index="{2 if i % 2 == 0 else 5}" src="{audio_rel}"></audio>''')
 
-        if subtitles_on:
+        if subtitles_on and position != "off":
             block_text = next((b['text'] for b in parsed_data['script_blocks']
                                if b['slide'] == item['slide']), "")
             plain, kw_spans = parse_emphasis(block_text)
@@ -989,8 +1066,11 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
                 sa = round(start + t0, 3)
                 ea = round(start + t1, 3)
                 subtitle_count += 1
+                timeline.append({"kind": "subtitle", "id": f"sub-{seq}-{k + 1}", "slide": item['slide'],
+                                 "start": sa, "end": ea, "position": position,
+                                 "text": re.sub(r"<[^>]+>", "", html)})
                 clips.append(f'''
-        <div id="sub-{seq}-{k + 1}" class="clip subtitle-wrapper" data-start="{sa:.3f}" data-duration="{max(0.15, round(ea - sa, 3)):.3f}" data-track-index="3" style="z-index:500">
+        <div id="sub-{seq}-{k + 1}" class="clip subtitle-wrapper{sub_cls}" data-start="{sa:.3f}" data-duration="{max(0.15, round(ea - sa, 3)):.3f}" data-track-index="3" style="z-index:500">
           <div class="subtitle-box">{html}</div>
         </div>''')
 
@@ -1052,6 +1132,7 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
         "__STROKE_COLOR__": design.get("stroke_color", "#000000"),
         "__HIGHLIGHT_COLOR__": design.get("highlight_color", "#FFD700"),
         "__SUBTITLE_BG__": subtitle_bg,
+        "__BAND_HEIGHT__": str(int(design.get("subtitle_band_height", 210))),
         "__CARD_BG_A__": card.get("bg_a", "#0b1020"),
         "__CARD_BG_B__": card.get("bg_b", "#101830"),
         "__ACCENT_A__": card.get("accent_a", "#5a8cff"),
@@ -1063,8 +1144,13 @@ def generate_hyperframes_config(parsed_data, audio_data, style, video_title):
 
     modes = "+".join(sorted(set(subtitle_modes))) if subtitle_modes else "off"
     log(f"   - {html_path} を生成しました。(合計尺: {total:.1f}秒 / テロップ {subtitle_count}枚 / 同期: {modes})")
+    if intro_dur > 0:
+        timeline.insert(0, {"kind": "intro", "start": 0.0, "end": intro_dur})
+    if outro_cfg.get("enabled", True):
+        timeline.append({"kind": "outro", "start": round(content_end, 3), "end": round(total, 3)})
     return {"html_path": html_path, "sfx_events": sfx_events, "total": total,
-            "subtitle_count": subtitle_count, "subtitle_mode": modes, "subtitles_enabled": subtitles_on}
+            "subtitle_count": subtitle_count, "subtitle_mode": modes, "subtitles_enabled": subtitles_on,
+            "timeline": timeline}
 
 
 # =====================================================================
@@ -1379,7 +1465,10 @@ def quality_gate(ctx):
         add("TTS", "PASS", f"{tts['engine_expected']} ({tts['model']}) 生成 {tts['generated']}文 / キャッシュ {tts['cached']}文")
 
     comp = ctx["comp"]
-    if comp["subtitles_enabled"]:
+    scenes = [e for e in comp.get("timeline", []) if e["kind"] == "scene"]
+    if scenes and all(e["position"] == "off" for e in scenes):
+        add("テロップ", "PASS", "無効（storyboard.json で全場面 off）")
+    elif comp["subtitles_enabled"]:
         add("テロップ", "PASS" if comp["subtitle_count"] > 0 else "FAIL",
             f"{comp['subtitle_count']}枚 / 同期: {comp['subtitle_mode']}")
     else:
@@ -1607,6 +1696,70 @@ def bgm_choose(video_title, n):
 # main
 # =====================================================================
 
+def draft_review(video_title, base_style):
+    """下書き: 全尺を書き出さずに、テロップ1枚ごとの表示中央などのコマだけを撮る（自己レビュー用・数十秒）。
+    出力: work/<動画名>/review/NNN_*.jpg と frames.json / frames.md（どのコマが何の場面か）"""
+    project_work = WORK_DIR / video_title
+    project_work.mkdir(parents=True, exist_ok=True)
+    set_log_file(project_work / "run.log")
+    log(f"--- 下書き（自己レビュー用コマ）: {video_title} ---")
+
+    parsed = parse_input(video_title)
+    style = resolve_style(base_style, parsed.get("preset"), parsed.get("project_style"))
+    audio_data, _ = generate_tts(parsed['script_blocks'], video_title, style)
+    comp = generate_hyperframes_config(parsed, audio_data, style, video_title)
+
+    shots = []
+    subtitled = {e["slide"] for e in comp["timeline"] if e["kind"] == "subtitle"}
+    for e in comp["timeline"]:
+        if e["kind"] == "subtitle":
+            t = (e["start"] + e["end"]) / 2
+        elif e["kind"] == "scene" and e["slide"] not in subtitled:
+            t = (e["start"] + e["end"]) / 2          # テロップを出さない場面も1コマは見る
+        elif e["kind"] in ("intro", "outro"):
+            t = e["start"] + min(1.6, (e["end"] - e["start"]) * 0.6)
+        else:
+            continue
+        shots.append({**e, "t": round(t, 2)})
+    seen = set()
+    shots = [s for s in shots if not (s["t"] in seen or seen.add(s["t"]))]
+
+    review_dir = project_work / "review"
+    raw_dir = project_work / "review_raw"
+    for d in (review_dir, raw_dir):
+        if d.exists():
+            shutil.rmtree(d)
+    review_dir.mkdir(parents=True)
+    log(f"   - コマを {len(shots)} 枚撮影します...")
+    run_command(get_pinned_cli() + ["snapshot", "--at", ",".join(f"{s['t']}" for s in shots),
+                                    "--no-end", "--describe", "false", "-o", str(raw_dir.absolute()), "."],
+                cwd=str(APP_DIR))
+    raws = sorted(raw_dir.glob("frame-*.png"))
+    if len(raws) != len(shots):
+        raise RuntimeError(f"コマの枚数が合いません（予定 {len(shots)} / 実際 {len(raws)}）。{raw_dir} を確認してください")
+
+    frames = []
+    for n, (shot, raw) in enumerate(zip(shots, raws), start=1):
+        label = f"s{shot['slide']:02d}" if "slide" in shot else shot["kind"]
+        name = f"{n:03d}_{label}.jpg"
+        with Image.open(raw) as im:
+            im = im.convert("RGB")
+            im.thumbnail((1280, 1280))
+            im.save(review_dir / name, "JPEG", quality=88)
+        frames.append({"file": name, "t": shot["t"], "kind": shot["kind"], "slide": shot.get("slide"),
+                       "subtitle_position": shot.get("position"), "text": shot.get("text")})
+    shutil.rmtree(raw_dir)
+
+    (review_dir / "frames.json").write_text(json.dumps(frames, ensure_ascii=False, indent=2), encoding="utf-8")
+    lines = ["| コマ | 秒 | 種類 | スライド | テロップ |", "|---|---|---|---|---|"]
+    for f in frames:
+        text = (f["text"] or "").replace("\n", " / ")
+        lines.append(f"| {f['file']} | {f['t']} | {f['kind']} | {f['slide'] or ''} | {text} |")
+    (review_dir / "frames.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    log(f"--- 下書き完了: {review_dir}（{len(frames)} コマ・一覧は frames.md） ---")
+    return review_dir
+
+
 def process_project(video_title, base_style, strict=False):
     project_work = WORK_DIR / video_title
     project_work.mkdir(parents=True, exist_ok=True)
@@ -1684,6 +1837,8 @@ def main(argv=None):
     parser.add_argument("--bgm-choose", type=int, metavar="N", help="BGM 候補 N を採用して台本に # BGM: を書く")
     parser.add_argument("--bgm-query", help="--bgm-candidates の検索語を指定（英語。例: 'upbeat ukulele'）")
     parser.add_argument("--count", type=int, default=3, help="--bgm-candidates の候補数（既定 3）")
+    parser.add_argument("--draft", action="store_true",
+                        help="全尺を書き出さず、テロップごとのコマだけ work/<動画名>/review/ に撮る（自己レビュー用）")
     args = parser.parse_args(argv)
 
     log("=== 自動制作パイプライン開始 ===")
@@ -1708,6 +1863,20 @@ def main(argv=None):
     if not projects:
         log("inbox に処理対象のプロジェクトがありません（inbox/<動画名>/ に PDF と script.md を置いてください）。")
         return EXIT_OK
+
+    if args.draft:
+        failed = False
+        for project_dir in sorted(projects):
+            try:
+                draft_review(project_dir.name, base_style)
+            except Exception as e:
+                import traceback
+                log(f"[ERROR] {project_dir.name} の下書きでエラー: {e}")
+                traceback.print_exc()
+                failed = True
+            finally:
+                set_log_file(None)
+        return EXIT_ERROR if failed else EXIT_OK
 
     if args.bgm_candidates or args.bgm_choose is not None:
         if len(projects) != 1:

@@ -79,6 +79,13 @@
       }
       .subtitle-box .kw { color: __HIGHLIGHT_COLOR__; }
 
+      /* テロップ位置（storyboard.json の subtitle で場面ごとに指定。既定 bottom はクラスなし）
+         top  : スライド下部に図やラベルがある場面で上に逃がす
+         band : スライドを上に縮めて下に専用の帯を作る（スライドのどこにも重ならない） */
+      .subtitle-wrapper.pos-top { bottom: auto; top: 58px; align-items: flex-start; }
+      .slide-scene.layout-band .kb-wrap { bottom: __BAND_HEIGHT__px; }
+      .subtitle-wrapper.pos-band { bottom: 0; height: __BAND_HEIGHT__px; align-items: center; }
+
       /* ===== イントロ / アウトロカード ===== */
       .card-scene { position: absolute; inset: 0; }
       .card-bg {

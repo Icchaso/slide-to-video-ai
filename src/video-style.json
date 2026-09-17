@@ -9,6 +9,8 @@
     "subtitle_background": "band",
     "subtitle_max_chars_per_line": 16,
     "subtitle_max_lines": 2,
+    "subtitle_position": "bottom",
+    "subtitle_band_height": 210,
     "intro_label": "VIDEO GUIDE",
     "card": {
       "bg_a": "#0b1020",
